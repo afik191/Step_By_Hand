@@ -1,0 +1,96 @@
+#include <Arduino.h>
+#include <WiFi.h>
+#include <HTTPClient.h>
+#include <esp_system.h>
+#include <Seeed_Arduino_SSCMA.h>
+
+SSCMA AI;
+
+// ===== User Config =====
+static const char* class_names[]   = {"Red", "Black"};
+static const char* ssid            = "ArduinoHotSpot";
+static const char* password        = "12345678";
+static const char* serverUrlBase   = "http://192.168.4.1/color?value=";
+
+static const int   DETECT_THRESHOLD   = 85;     // %
+static const uint32_t WIFI_TIMEOUT_MS = 20000;
+static const uint32_t HTTP_THROTTLE_MS= 2000;
+static const uint16_t HTTP_TIMEOUT_MS = 800;
+
+// ===== UART to Vision (OFF by default to avoid USB pin conflict on ESP32-C3) =====
+static const bool USE_UART_FOR_VISION = false; // set true ONLY if you wired UART
+static const int  RX_PIN = 4; // <-- CHANGE if you enable UART (avoid 18/19)
+static const int  TX_PIN = 5; // <-- CHANGE if you enable UART (avoid 18/19)
+
+// ---------- Helpers ----------
+void connect_wifi() {
+  WiFi.mode(WIFI_STA);
+  WiFi.setSleep(false);
+  WiFi.begin(ssid, password);
+
+  uint32_t start = millis();
+  while (WiFi.status() != WL_CONNECTED && millis() - start < WIFI_TIMEOUT_MS) {
+    delay(100);
+  }
+}
+
+// ---------- Arduino lifecycle ----------
+void setup() {
+  Serial.begin(115200);
+  unsigned long t0 = millis();
+  while (!Serial && millis() - t0 < 5000) { } // wait for USB-CDC attach
+
+  if (USE_UART_FOR_VISION) {
+    Serial1.begin(9600, SERIAL_8N1, RX_PIN, TX_PIN);
+  }
+
+  connect_wifi();
+
+  AI.begin(); // if this fails, we stay quiet by design
+}
+
+void loop() {
+  // AI frame
+  int rc = AI.invoke(); // many SSCMA builds: 0 = success
+  if (rc == 0) {
+    auto &v = AI.classes();
+    for (int i = 0; i < (int)v.size(); i++) {
+      int target = v[i].target;
+      int score  = v[i].score;
+
+      if (target >= 0 && target < (int)(sizeof(class_names)/sizeof(class_names[0])) && score > DETECT_THRESHOLD) {
+        String color = class_names[target];
+
+        // ---- ONLY THIS PRINTS ----
+        Serial.printf("color detected: %s\n", color.c_str());
+
+        // Throttled HTTP with short timeout (silent)
+        static uint32_t lastSend = 0;
+        if (millis() - lastSend > HTTP_THROTTLE_MS && WiFi.status() == WL_CONNECTED) {
+          HTTPClient http;
+          http.setTimeout(HTTP_TIMEOUT_MS);
+          String url = String(serverUrlBase) + color;
+          if (http.begin(url)) {
+            (void)http.GET(); // ignore code; stay silent
+            http.end();
+          }
+          lastSend = millis();
+        }
+        // small debounce so you don't spam identical lines continuously
+        delay(200);
+      }
+    }
+  } else {
+    delay(20); // yield so USB/Wi-Fi tasks run
+  }
+
+  // Soft auto-reconnect (silent)
+  static uint32_t lastWiFiChk = 0;
+  if (millis() - lastWiFiChk > 3000) {
+    if (WiFi.status() != WL_CONNECTED) {
+      WiFi.disconnect();
+      WiFi.begin(ssid, password);
+    }
+    lastWiFiChk = millis();
+  }
+}
