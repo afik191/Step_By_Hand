@@ -3,9 +3,19 @@ import sys
 import math
 import time
 import random
-import serial
+from collections import deque
+
 import mediapipe as mp
-import speech_recognition as sr
+
+try:
+    import speech_recognition as sr
+except Exception:
+    sr = None
+
+try:
+    import serial
+except Exception:
+    serial = None
 
 # -------------------------------------------------
 # Configuration
@@ -14,123 +24,103 @@ import speech_recognition as sr
 ARDUINO_PORT = "COM4"
 ARDUINO_BAUD_RATE = 9600
 
-# If Arduino is not connected, the program will keep running
-# and will only print the commands that would have been sent.
-SIMULATION_MODE = False
+BACK_EXIT_CODE = 10
+GESTURE_HOLD_SECONDS = 1.5
+ANSWER_STABLE_SECONDS = 0.8
+FEEDBACK_SECONDS = 2.2
 
-# -------------------------------------------------
-# Global Learning Mode Variables
-# -------------------------------------------------
-
-learning_state = "START"
-
-target_number = 0              # המספר שהרובוט מציג
-spoken_number = None           # המספר שהמשתמש אמר
-current_finger_count = -1      # מספר האצבעות שהמשתמש מראה
-
-round_start_time = 0
-feedback_start_time = 0
-last_state_change_time = 0
-
-feedback_text = ""
-feedback_color = (255, 255, 255)
-
-# הגבלה פיזית של הרובוט
 MIN_FINGERS = 0
 MAX_FINGERS = 5
 
-# מספרים שהמשתמש יכול להגיד באנגלית
+# Colors - darker and clearer on camera background
+TITLE_COLOR = (0, 0, 0)        # black
+OPTION_COLOR = (0, 0, 220)     # red
+NOTE_COLOR = (60, 60, 60)      # dark gray
+HOLD_COLOR = (100, 40, 0)      # dark brown/blue-ish in BGR
+GOOD_COLOR = (0, 140, 0)       # dark green
+BAD_COLOR = (0, 0, 180)        # dark red
+INFO_COLOR = (45, 45, 45)      # dark gray
+
 NUMBER_WORDS = {
     "ZERO": 0,
     "OH": 0,
-
     "ONE": 1,
     "WON": 1,
-
     "TWO": 2,
     "TO": 2,
     "TOO": 2,
-
     "THREE": 3,
     "TREE": 3,
-
     "FOUR": 4,
     "FOR": 4,
-
     "FIVE": 5,
-    "FIFE": 5
+    "FIFE": 5,
 }
 
+# -------------------------------------------------
+# Global state
+# -------------------------------------------------
+
+state = "READY"  # READY -> WAIT_FOR_USER -> FEEDBACK -> ROUND_END_MENU
+
+target_number = 0
+spoken_number = None
+heard_text = ""
+
+candidate_fingers = None
+candidate_start_time = 0.0
+stable_finger_answer = None
+
+feedback_text = ""
+feedback_color = INFO_COLOR
+feedback_start_time = 0.0
+
+hold_action = None
+hold_start_time = 0.0
+
+voice_queue = deque()
+stop_listening = None
+voice_enabled = False
+
+SIMULATION_MODE = False
+ser = None
 
 # -------------------------------------------------
-# Helper Functions
+# Helpers
 # -------------------------------------------------
+
 
 def get_dist(p1, p2):
     return math.hypot(p1.x - p2.x, p1.y - p2.y)
 
 
-def limit_robot_fingers(number):
-    """
-    Ensures the robot never receives an invalid number.
-    The robot has only 5 fingers.
-    """
+
+def limit_fingers(number):
     return max(MIN_FINGERS, min(MAX_FINGERS, int(number)))
 
 
-def init_serial_connection(port=ARDUINO_PORT, baud_rate=ARDUINO_BAUD_RATE):
-    """
-    Tries to connect to Arduino.
-    If Arduino is not connected, returns None and the program continues in simulation mode.
-    """
-    global SIMULATION_MODE
 
-    try:
-        ser = serial.Serial(port, baud_rate, timeout=1)
-        time.sleep(2)
-        SIMULATION_MODE = False
-        print(f"Connected to Arduino on {port}")
-        return ser
+def draw_lines(frame, lines, start_y, color, scale=0.85, thickness=2, step=42):
+    for i, line in enumerate(lines):
+        cv2.putText(
+            frame,
+            line,
+            (30, start_y + i * step),
+            cv2.FONT_HERSHEY_SIMPLEX,
+            scale,
+            color,
+            thickness,
+        )
 
-    except Exception as e:
-        SIMULATION_MODE = True
-        print(f"Arduino not connected. Running in simulation mode.")
-        print(f"   Serial details: {e}")
-        return None
-
-
-def send_robot_fingers(ser, number):
-    """
-    Sends the desired number of fingers to the Arduino.
-    If Arduino is not connected, prints the command instead of crashing.
-    Arduino should support commands: '0', '1', '2', '3', '4', '5'
-    """
-    safe_number = limit_robot_fingers(number)
-    command = str(safe_number).encode()
-
-    if ser is not None and ser.is_open:
-        try:
-            ser.write(command)
-            print(f"Robot shows {safe_number} fingers")
-        except Exception as e:
-            print(f"Could not send command to Arduino: {e}")
-            print(f"Simulation fallback - robot would show {safe_number} fingers")
-    else:
-        print(f"Simulation mode - robot would show {safe_number} fingers")
 
 
 def parse_number_from_voice(command):
-    """
-    Converts recognized voice text into a number between 0 and 5.
-    """
     command = command.upper()
 
-    # Check digits first: "1", "2", "3"...
     for digit in range(0, 6):
         if str(digit) in command:
             return digit
 
-    # Check word variations
     for word, number in NUMBER_WORDS.items():
         if word in command:
             return number
@@ -138,11 +128,8 @@ def parse_number_from_voice(command):
     return None
 
 
+
 def count_fingers_from_landmarks(hand_landmarks):
-    """
-    Counts how many fingers the user shows.
-    This is based on your existing rule-based approach.
-    """
     wrist = hand_landmarks.landmark[0]
     hand_scale = get_dist(wrist, hand_landmarks.landmark[9])
 
@@ -170,17 +157,42 @@ def count_fingers_from_landmarks(hand_landmarks):
         else:
             fingers.append(0)
 
-    count = sum(fingers)
-
-    # Safety limit
-    return limit_robot_fingers(count)
+    return limit_fingers(sum(fingers))
 
 
-def is_back_gesture(hand_landmarks):
+
+def is_ok_gesture(hand_landmarks):
     """
-    Back gesture: Shaka / Call Me sign.
-    Thumb and pinky are open, while index, middle, and ring are closed.
-    Used only in safe states to return to the previous menu.
+    OK sign = Back.
+    Thumb tip close to index tip, middle/ring/pinky open.
+    """
+    wrist = hand_landmarks.landmark[0]
+    hand_scale = get_dist(wrist, hand_landmarks.landmark[9])
+
+    if hand_scale <= 0:
+        return False
+
+    thumb_index_dist = get_dist(hand_landmarks.landmark[4], hand_landmarks.landmark[8])
+
+    def is_finger_open(tip_idx, mip_idx):
+        mip_dist = get_dist(wrist, hand_landmarks.landmark[mip_idx])
+        if mip_dist <= 0:
+            return False
+        tip_dist = get_dist(wrist, hand_landmarks.landmark[tip_idx])
+        return tip_dist / mip_dist > 1.10
+
+    middle_open = is_finger_open(12, 10)
+    ring_open = is_finger_open(16, 14)
+    pinky_open = is_finger_open(20, 18)
+
+    return thumb_index_dist < hand_scale * 0.35 and middle_open and ring_open and pinky_open
+
+
+
+def is_thumbs_up(hand_landmarks):
+    """
+    Thumbs up = Start / play again.
+    Thumb open, other fingers closed.
     """
     wrist = hand_landmarks.landmark[0]
     hand_scale = get_dist(wrist, hand_landmarks.landmark[9])
@@ -202,94 +214,275 @@ def is_back_gesture(hand_landmarks):
     ring_open = is_finger_open(16, 14)
     pinky_open = is_finger_open(20, 18)
 
-    return thumb_open and pinky_open and not index_open and not middle_open and not ring_open
+    return thumb_open and not index_open and not middle_open and not ring_open and not pinky_open
+
+
+
+def update_hold(desired_action, current_time):
+    global hold_action, hold_start_time
+
+    if desired_action is None:
+        hold_action = None
+        hold_start_time = 0.0
+        return None, 0.0
+
+    if desired_action != hold_action:
+        hold_action = desired_action
+        hold_start_time = current_time
+        return None, 0.0
+
+    elapsed = current_time - hold_start_time
+
+    if elapsed >= GESTURE_HOLD_SECONDS:
+        completed_action = hold_action
+        hold_action = None
+        hold_start_time = 0.0
+        return completed_action, elapsed
+
+    return None, elapsed
+
+
+
+def draw_hold_status(frame, current_time):
+    h, _, _ = frame.shape
+
+    if hold_action:
+        progress = min(GESTURE_HOLD_SECONDS, current_time - hold_start_time)
+        cv2.putText(
+            frame,
+            f"Hold action: {hold_action}",
+            (30, h - 90),
+            cv2.FONT_HERSHEY_SIMPLEX,
+            0.7,
+            HOLD_COLOR,
+            2,
+        )
+        cv2.putText(
+            frame,
+            f"Hold: {progress:.1f}s / {GESTURE_HOLD_SECONDS:.1f}s",
+            (30, h - 55),
+            cv2.FONT_HERSHEY_SIMPLEX,
+            0.7,
+            HOLD_COLOR,
+            2,
+        )
 
 
 # -------------------------------------------------
-# Voice Recognition Callback
+# Arduino
 # -------------------------------------------------
 
-def voice_callback(recognizer, audio):
-    global spoken_number, learning_state
+
+def init_serial_connection(port=ARDUINO_PORT, baud_rate=ARDUINO_BAUD_RATE):
+    global SIMULATION_MODE
+
+    if serial is None:
+        SIMULATION_MODE = True
+        print("PySerial not available. Running in simulation mode.")
+        return None
 
     try:
+        arduino = serial.Serial(port, baud_rate, timeout=1)
+        time.sleep(2)
+        SIMULATION_MODE = False
+        print(f"Connected to Arduino on {port}")
+        return arduino
+    except Exception as e:
+        SIMULATION_MODE = True
+        print("Arduino not connected. Running in simulation mode.")
+        print(f"Serial details: {e}")
+        return None
+
+
+
+def send_robot_fingers(number):
+    safe_number = limit_fingers(number)
+
+    if ser is not None and ser.is_open:
+        try:
+            ser.write(str(safe_number).encode())
+            print(f"Robot shows {safe_number} fingers")
+        except Exception as e:
+            print(f"Could not send to Arduino: {e}")
+            print(f"Simulation fallback - robot would show {safe_number} fingers")
+    else:
+        print(f"Simulation mode - robot would show {safe_number} fingers")
+
+
+# -------------------------------------------------
+# Voice
+# -------------------------------------------------
+
+
+def voice_callback(recognizer, audio):
+    try:
         command = recognizer.recognize_google(audio, language="en-US").upper()
-        print(f"Heard: {command}")
+        voice_queue.append(command)
+        print(f"Heard voice command: {command}")
+    except sr.UnknownValueError:
+        pass
+    except Exception as e:
+        print(f"Voice callback error: {e}")
 
+
+
+def init_voice():
+    global stop_listening, voice_enabled
+
+    voice_enabled = False
+    stop_listening = None
+
+    if sr is None:
+        print("SpeechRecognition is not available. Voice disabled.")
+        return
+
+    try:
+        recognizer = sr.Recognizer()
+        microphone = sr.Microphone()
+
+        recognizer.energy_threshold = 1000
+        recognizer.dynamic_energy_threshold = False
+        recognizer.non_speaking_duration = 0.3
+        recognizer.pause_threshold = 0.3
+
+        print("Calibrating microphone...")
+        with microphone as source:
+            recognizer.adjust_for_ambient_noise(source, duration=1)
+
+        stop_listening = recognizer.listen_in_background(
+            microphone,
+            voice_callback,
+            phrase_time_limit=1.2,
+        )
+        voice_enabled = True
+        print("Voice control active")
+
+    except Exception as e:
+        voice_enabled = False
+        stop_listening = None
+        print(f"Voice not available. Continuing with fingers only. Details: {e}")
+
+
+
+def stop_voice():
+    global stop_listening
+
+    if stop_listening is not None:
+        try:
+            stop_listening(wait_for_stop=False)
+        except Exception:
+            pass
+    stop_listening = None
+
+
+# -------------------------------------------------
+# Game logic
+# -------------------------------------------------
+
+
+def start_round():
+    global state, target_number, spoken_number, heard_text
+    global candidate_fingers, candidate_start_time, stable_finger_answer
+    global feedback_text, feedback_color
+
+    target_number = random.randint(1, 5)
+    spoken_number = None
+    heard_text = ""
+
+    candidate_fingers = None
+    candidate_start_time = 0.0
+    stable_finger_answer = None
+
+    feedback_text = ""
+    feedback_color = INFO_COLOR
+
+    send_robot_fingers(target_number)
+    state = "WAIT_FOR_USER"
+    print(f"Target number: {target_number}")
+
+
+
+def go_to_feedback(finger_answer, voice_answer):
+    global state, feedback_text, feedback_color, feedback_start_time
+
+    finger_correct = finger_answer == target_number
+
+    # If voice exists, require it too. If microphone is unavailable or no voice was heard,
+    # the round can still complete by fingers only.
+    if voice_enabled and voice_answer is not None:
+        voice_correct = voice_answer == target_number
+    else:
+        voice_correct = True
+
+    if finger_correct and voice_correct:
+        feedback_text = "GOOD JOB!"
+        feedback_color = GOOD_COLOR
+    else:
+        mistakes = []
+        if not finger_correct:
+            mistakes.append(f"Fingers: {finger_answer}, robot: {target_number}")
+        if not voice_correct:
+            mistakes.append(f"Voice: {voice_answer}, robot: {target_number}")
+        feedback_text = "TRY AGAIN - " + " | ".join(mistakes)
+        feedback_color = BAD_COLOR
+
+    send_robot_fingers(0)
+    feedback_start_time = time.time()
+    state = "FEEDBACK"
+    print(feedback_text)
+
+
+
+def process_voice_command(command):
+    global spoken_number, heard_text
+
+    heard_text = command
+
+    if "BACK" in command:
+        send_robot_fingers(0)
+        sys.exit(BACK_EXIT_CODE)
+
+    if state in ["READY", "ROUND_END_MENU"]:
+        if any(word in command for word in ["START", "BEGIN", "PLAY", "AGAIN"]):
+            start_round()
+            return
+
+    if state == "WAIT_FOR_USER":
         number = parse_number_from_voice(command)
-
-        if learning_state == "WAIT_FOR_USER" and number is not None:
+        if number is not None:
             spoken_number = number
             print(f"User said number: {spoken_number}")
 
-    except sr.UnknownValueError:
-        pass
-
-    except sr.RequestError as e:
-        print(f"Voice Service Error: {e}")
-
 
 # -------------------------------------------------
-# Init Voice Recognition
-# -------------------------------------------------
-
-r = sr.Recognizer()
-m = sr.Microphone()
-
-r.energy_threshold = 1000
-r.dynamic_energy_threshold = False
-r.non_speaking_duration = 0.3
-r.pause_threshold = 0.3
-
-print("Calibrating microphone...")
-with m as source:
-    r.adjust_for_ambient_noise(source, duration=1)
-
-stop_listening = r.listen_in_background(
-    m,
-    voice_callback,
-    phrase_time_limit=1.2
-)
-
-print("Voice recognition active")
-
-
-# -------------------------------------------------
-# Init Serial Connection
+# Init
 # -------------------------------------------------
 
 ser = init_serial_connection()
+init_voice()
 
-
-# -------------------------------------------------
-# Init MediaPipe
-# -------------------------------------------------
-
-# Some MediaPipe installations do not expose `solutions` directly as
-# `mp.solutions`. This fallback keeps the code compatible with both cases.
 try:
     mp_hands = mp.solutions.hands
     mp_drawing = mp.solutions.drawing_utils
 except AttributeError:
-    print("MediaPipe does not expose mp.solutions directly. Using fallback imports.")
-    from mediapipe.python.solutions import hands as mp_hands
-    from mediapipe.python.solutions import drawing_utils as mp_drawing
+    print("MediaPipe does not expose mp.solutions directly. Check MediaPipe installation.")
+    stop_voice()
+    raise SystemExit(1)
 
 cap = cv2.VideoCapture(0)
 
 if not cap.isOpened():
     print("Camera Error: could not open camera")
-    stop_listening(wait_for_stop=False)
+    stop_voice()
     if ser is not None and ser.is_open:
         ser.close()
-    raise SystemExit
+    raise SystemExit(1)
 
-print("Learning Mode Started")
-print("Press 'q' to quit")
-
+print("Counting Mode Started")
+print("Press q to quit")
 
 # -------------------------------------------------
-# Main Loop
+# Main loop
 # -------------------------------------------------
 
 try:
@@ -297,7 +490,7 @@ try:
         model_complexity=1,
         max_num_hands=1,
         min_detection_confidence=0.8,
-        min_tracking_confidence=0.8
+        min_tracking_confidence=0.8,
     ) as hands:
 
         while cap.isOpened():
@@ -311,290 +504,219 @@ try:
             rgb_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
             results = hands.process(rgb_frame)
 
-            current_finger_count = -1
-            current_back_gesture = False
+            current_fingers = -1
+            current_ok = False
+            current_thumbs = False
 
-            # -----------------------------
-            # Detect user's fingers
-            # -----------------------------
             if results.multi_hand_landmarks:
                 for hand_landmarks in results.multi_hand_landmarks:
-                    mp_drawing.draw_landmarks(
-                        frame,
-                        hand_landmarks,
-                        mp_hands.HAND_CONNECTIONS
-                    )
-
-                    current_finger_count = count_fingers_from_landmarks(hand_landmarks)
-                    current_back_gesture = is_back_gesture(hand_landmarks)
+                    mp_drawing.draw_landmarks(frame, hand_landmarks, mp_hands.HAND_CONNECTIONS)
+                    current_fingers = count_fingers_from_landmarks(hand_landmarks)
+                    current_ok = is_ok_gesture(hand_landmarks)
+                    current_thumbs = is_thumbs_up(hand_landmarks)
 
             current_time = time.time()
 
+            while voice_queue:
+                process_voice_command(voice_queue.popleft())
+
             # -----------------------------
-            # START
+            # READY
             # -----------------------------
-            if learning_state == "START":
-                cv2.putText(
+            if state == "READY":
+                draw_lines(frame, ["COUNTING / IMITATION"], 65, TITLE_COLOR, scale=1.1, thickness=3)
+                draw_lines(
                     frame,
-                    "Learning Mode: Count with the Robot",
-                    (30, 100),
-                    cv2.FONT_HERSHEY_SIMPLEX,
-                    1,
-                    (255, 255, 255),
-                    2
+                    ["Thumbs up = Start learning", "Voice: say START"],
+                    150,
+                    OPTION_COLOR,
+                    scale=0.9,
+                    thickness=2,
+                    step=45,
+                )
+                draw_lines(
+                    frame,
+                    ["OK sign = Back to Education Menu", "Voice: say BACK"],
+                    260,
+                    NOTE_COLOR,
+                    scale=0.75,
+                    thickness=2,
+                    step=38,
                 )
 
-                cv2.putText(
-                    frame,
-                    "Show open hand to start",
-                    (30, 170),
-                    cv2.FONT_HERSHEY_SIMPLEX,
-                    1,
-                    (0, 255, 255),
-                    2
-                )
+                desired_action = "START" if current_thumbs else ("BACK" if current_ok else None)
+                action, _ = update_hold(desired_action, current_time)
 
-                cv2.putText(
-                    frame,
-                    "Back gesture = return to Education Menu",
-                    (30, 220),
-                    cv2.FONT_HERSHEY_SIMPLEX,
-                    0.75,
-                    (200, 200, 200),
-                    2
-                )
+                if action == "START":
+                    start_round()
+                elif action == "BACK":
+                    send_robot_fingers(0)
+                    sys.exit(BACK_EXIT_CODE)
 
-                if SIMULATION_MODE:
+            # -----------------------------
+            # WAIT_FOR_USER
+            # -----------------------------
+            elif state == "WAIT_FOR_USER":
+                draw_lines(frame, ["COPY THE ROBOT"], 65, TITLE_COLOR, scale=1.1, thickness=3)
+                draw_lines(frame, [f"Robot shows: {target_number}"], 145, OPTION_COLOR, scale=1.0, thickness=2)
+
+                instructions = [
+                    "Show the same number with your fingers",
+                    "Say the number out loud",
+                    "OK sign = Back to Education Menu",
+                    "Voice: BACK",
+                ]
+                draw_lines(frame, instructions, 215, NOTE_COLOR, scale=0.72, thickness=2, step=36)
+
+                if current_fingers != -1:
                     cv2.putText(
                         frame,
-                        "Arduino: simulation mode",
-                        (30, 270),
+                        f"Detected fingers: {current_fingers}",
+                        (30, 375),
                         cv2.FONT_HERSHEY_SIMPLEX,
                         0.8,
-                        (0, 165, 255),
-                        2
+                        INFO_COLOR,
+                        2,
                     )
 
-                if current_time - last_state_change_time > 1.0:
-                    if current_back_gesture:
-                        send_robot_fingers(ser, 0)
-                        print("Back gesture detected - returning to Education Menu")
-                        sys.exit(10)
+                    if candidate_fingers != current_fingers:
+                        candidate_fingers = current_fingers
+                        candidate_start_time = current_time
+                    else:
+                        finger_hold = current_time - candidate_start_time
+                        cv2.putText(
+                            frame,
+                            f"Finger hold: {finger_hold:.1f}s / {ANSWER_STABLE_SECONDS:.1f}s",
+                            (30, 415),
+                            cv2.FONT_HERSHEY_SIMPLEX,
+                            0.72,
+                            HOLD_COLOR,
+                            2,
+                        )
 
-                    # מתחילים באמצעות 5 אצבעות
-                    elif current_finger_count == 5:
-                        learning_state = "SHOW_ROBOT"
-                        last_state_change_time = current_time
-                        print("Learning started")
-
-            # -----------------------------
-            # ROBOT SHOWS NUMBER
-            # -----------------------------
-            elif learning_state == "SHOW_ROBOT":
-                target_number = random.randint(1, 5)
-                spoken_number = None
-
-                send_robot_fingers(ser, target_number)
-
-                round_start_time = current_time
-                learning_state = "WAIT_FOR_USER"
-
-                print(f"Target number: {target_number}")
-
-            # -----------------------------
-            # WAIT FOR USER RESPONSE
-            # -----------------------------
-            elif learning_state == "WAIT_FOR_USER":
-                cv2.putText(
-                    frame,
-                    f"Robot shows: {target_number}",
-                    (50, 80),
-                    cv2.FONT_HERSHEY_SIMPLEX,
-                    1.2,
-                    (0, 255, 255),
-                    3
-                )
-
-                if SIMULATION_MODE:
-                    cv2.putText(
-                        frame,
-                        "Arduino is not connected - simulation mode",
-                        (50, 120),
-                        cv2.FONT_HERSHEY_SIMPLEX,
-                        0.65,
-                        (0, 165, 255),
-                        2
-                    )
-
-                cv2.putText(
-                    frame,
-                    "Show the same number of fingers",
-                    (50, 170),
-                    cv2.FONT_HERSHEY_SIMPLEX,
-                    0.9,
-                    (255, 255, 255),
-                    2
-                )
-
-                cv2.putText(
-                    frame,
-                    "And say the number out loud",
-                    (50, 220),
-                    cv2.FONT_HERSHEY_SIMPLEX,
-                    0.9,
-                    (255, 255, 255),
-                    2
-                )
-
-                if current_finger_count != -1:
-                    cv2.putText(
-                        frame,
-                        f"Detected fingers: {current_finger_count}",
-                        (50, 300),
-                        cv2.FONT_HERSHEY_SIMPLEX,
-                        0.9,
-                        (200, 200, 200),
-                        2
-                    )
+                        if finger_hold >= ANSWER_STABLE_SECONDS:
+                            stable_finger_answer = current_fingers
 
                 if spoken_number is not None:
                     cv2.putText(
                         frame,
                         f"Heard number: {spoken_number}",
-                        (50, 350),
+                        (30, 455),
                         cv2.FONT_HERSHEY_SIMPLEX,
-                        0.9,
-                        (200, 200, 200),
-                        2
+                        0.8,
+                        INFO_COLOR,
+                        2,
+                    )
+                elif heard_text:
+                    cv2.putText(
+                        frame,
+                        f"Heard: {heard_text}",
+                        (30, 455),
+                        cv2.FONT_HERSHEY_SIMPLEX,
+                        0.65,
+                        INFO_COLOR,
+                        2,
                     )
 
-                # בדיקה רק כשיש גם יד מזוהה וגם מספר שנאמר
-                if current_finger_count != -1 and spoken_number is not None:
-                    finger_correct = current_finger_count == target_number
-                    voice_correct = spoken_number == target_number
-
-                    if finger_correct and voice_correct:
-                        feedback_text = "Correct! Great job!"
-                        feedback_color = (0, 255, 0)
-
+                # Main fix:
+                # When the finger answer is stable, finish the round automatically.
+                # If voice is enabled and already heard a number, it checks both.
+                # If voice is unavailable or no number was heard yet, it still gives feedback from fingers.
+                if stable_finger_answer is not None:
+                    if voice_enabled:
+                        if spoken_number is not None:
+                            go_to_feedback(stable_finger_answer, spoken_number)
+                        else:
+                            cv2.putText(
+                                frame,
+                                "Waiting for voice number...",
+                                (30, 495),
+                                cv2.FONT_HERSHEY_SIMPLEX,
+                                0.72,
+                                HOLD_COLOR,
+                                2,
+                            )
                     else:
-                        mistakes = []
+                        go_to_feedback(stable_finger_answer, None)
 
-                        if not finger_correct:
-                            mistakes.append(
-                                f"You showed {current_finger_count}, but robot showed {target_number}"
-                            )
+                desired_action = "BACK" if current_ok else None
+                action, _ = update_hold(desired_action, current_time)
 
-                        if not voice_correct:
-                            mistakes.append(
-                                f"You said {spoken_number}, but robot showed {target_number}"
-                            )
-
-                        feedback_text = " | ".join(mistakes)
-                        feedback_color = (0, 0, 255)
-
-                    feedback_start_time = current_time
-                    learning_state = "FEEDBACK"
+                if action == "BACK":
+                    send_robot_fingers(0)
+                    sys.exit(BACK_EXIT_CODE)
 
             # -----------------------------
             # FEEDBACK
             # -----------------------------
-            elif learning_state == "FEEDBACK":
-                cv2.putText(
-                    frame,
-                    feedback_text,
-                    (30, h // 2),
-                    cv2.FONT_HERSHEY_SIMPLEX,
-                    0.8,
-                    feedback_color,
-                    2
-                )
+            elif state == "FEEDBACK":
+                draw_lines(frame, [feedback_text], h // 2 - 30, feedback_color, scale=0.95, thickness=3)
 
-                cv2.putText(
-                    frame,
-                    "Round finished",
-                    (30, h // 2 + 70),
-                    cv2.FONT_HERSHEY_SIMPLEX,
-                    0.8,
-                    (255, 255, 255),
-                    2
-                )
-
-                if current_time - feedback_start_time > 2:
-                    learning_state = "ROUND_END_MENU"
-                    last_state_change_time = current_time
+                if current_time - feedback_start_time >= FEEDBACK_SECONDS:
+                    state = "ROUND_END_MENU"
 
             # -----------------------------
             # ROUND_END_MENU
             # -----------------------------
-            elif learning_state == "ROUND_END_MENU":
-                cv2.putText(
+            elif state == "ROUND_END_MENU":
+                draw_lines(frame, ["ROUND FINISHED"], 65, TITLE_COLOR, scale=1.1, thickness=3)
+                draw_lines(frame, [feedback_text], 135, feedback_color, scale=0.9, thickness=3)
+                draw_lines(
                     frame,
-                    "Round finished",
-                    (30, 100),
-                    cv2.FONT_HERSHEY_SIMPLEX,
-                    1.2,
-                    (255, 255, 255),
-                    3
+                    [
+                        "Thumbs up = Start again",
+                        "Voice: say START",
+                        "OK sign = Back to Education Menu",
+                        "Voice: say BACK",
+                    ],
+                    235,
+                    OPTION_COLOR,
+                    scale=0.78,
+                    thickness=2,
+                    step=40,
                 )
 
+                desired_action = "START" if current_thumbs else ("BACK" if current_ok else None)
+                action, _ = update_hold(desired_action, current_time)
+
+                if action == "START":
+                    start_round()
+                elif action == "BACK":
+                    send_robot_fingers(0)
+                    sys.exit(BACK_EXIT_CODE)
+
+            draw_hold_status(frame, current_time)
+
+            if current_fingers != -1:
                 cv2.putText(
                     frame,
-                    "Show open hand to continue",
-                    (30, 180),
+                    f"Detected: {current_fingers}",
+                    (30, h - 20),
                     cv2.FONT_HERSHEY_SIMPLEX,
-                    0.9,
-                    (0, 255, 255),
-                    2
+                    0.65,
+                    INFO_COLOR,
+                    2,
                 )
 
+            if SIMULATION_MODE:
                 cv2.putText(
                     frame,
-                    "Back gesture = return to Education Menu",
-                    (30, 240),
+                    "Arduino: simulation mode",
+                    (30, 35),
                     cv2.FONT_HERSHEY_SIMPLEX,
-                    0.8,
-                    (200, 200, 200),
-                    2
+                    0.65,
+                    NOTE_COLOR,
+                    2,
                 )
 
-                if current_finger_count != -1:
-                    cv2.putText(
-                        frame,
-                        f"Detected fingers: {current_finger_count}",
-                        (30, h - 40),
-                        cv2.FONT_HERSHEY_SIMPLEX,
-                        0.75,
-                        (200, 200, 200),
-                        2
-                    )
-
-                if current_time - last_state_change_time > 1.0:
-                    if current_back_gesture:
-                        send_robot_fingers(ser, 0)
-                        print("Back gesture detected - returning to Education Menu")
-                        sys.exit(10)
-
-                    elif current_finger_count == 5:
-                        learning_state = "SHOW_ROBOT"
-                        last_state_change_time = current_time
-                        print("Continuing to next round")
-
-            # -----------------------------
-            # Display Window
-            # -----------------------------
             cv2.imshow("Learning Mode - Count with Robot", frame)
 
-            if cv2.waitKey(1) & 0xFF == ord('q'):
+            if cv2.waitKey(1) & 0xFF == ord("q"):
                 break
 
 finally:
-    # -------------------------------------------------
-    # Cleanup
-    # -------------------------------------------------
-    send_robot_fingers(ser, 0)
-
-    stop_listening(wait_for_stop=False)
+    send_robot_fingers(0)
+    stop_voice()
     cap.release()
     cv2.destroyAllWindows()
 
@@ -602,4 +724,4 @@ finally:
         ser.close()
         print("Arduino connection closed")
 
-    print("Learning Mode Closed")
+    print("Counting Mode Closed")
