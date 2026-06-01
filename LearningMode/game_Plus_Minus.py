@@ -23,7 +23,6 @@ try:
 except Exception:
     np = None
 
-# Colors
 TITLE_COLOR = (0, 0, 0)
 OPTION_COLOR = (0, 0, 220)
 NOTE_COLOR = (60, 60, 60)
@@ -31,10 +30,6 @@ HOLD_COLOR = (100, 40, 0)
 GOOD_COLOR = (0, 140, 0)
 BAD_COLOR = (0, 0, 180)
 INFO_COLOR = (50, 50, 50)
-
-# -------------------------------------------------
-# Split screen display
-# -------------------------------------------------
 
 PANEL_BG_COLOR = (255, 255, 255)
 DIVIDER_COLOR = (170, 170, 170)
@@ -154,7 +149,6 @@ def draw_hold_status(frame, current_time):
     h, _, _ = frame.shape
     if hold_action:
         progress = min(GESTURE_HOLD_SECONDS, current_time - hold_start_time)
-        # Positioned strictly at the bottom
         cv2.putText(frame, f"Hold action: {hold_action}", (30, h - 60), cv2.FONT_HERSHEY_SIMPLEX, 0.7, HOLD_COLOR, 2)
         cv2.putText(frame, f"Hold selection: {progress:.1f}s / {GESTURE_HOLD_SECONDS:.1f}s", (30, h - 30), cv2.FONT_HERSHEY_SIMPLEX, 0.7, HOLD_COLOR, 2)
 
@@ -162,7 +156,6 @@ def voice_callback(recognizer, audio):
     try:
         command = recognizer.recognize_google(audio, language="en-US").upper()
         voice_queue.append(command)
-        print(f"Heard voice command: {command}")
     except Exception:
         pass
 
@@ -183,9 +176,8 @@ def init_voice():
             r.adjust_for_ambient_noise(source, duration=1)
         stop_listening = r.listen_in_background(m, voice_callback, phrase_time_limit=1.2)
         voice_enabled = True
-        print("Voice control active")
-    except Exception as e:
-        print(f"Voice not available: {e}")
+    except Exception:
+        pass
 
 def stop_voice():
     global stop_listening
@@ -198,15 +190,12 @@ def stop_voice():
 
 def init_serial_connection(port="COM4", baud_rate=9600):
     if serial is None:
-        print("PySerial not available - running in simulation mode")
         return None
     try:
         ser = serial.Serial(port, baud_rate, timeout=1)
         time.sleep(2)
-        print(f"Connected to Arduino on {port}")
         return ser
-    except Exception as e:
-        print(f"Arduino not connected. Running in simulation mode. {e}")
+    except Exception:
         return None
 
 def send_robot_fingers(ser, number):
@@ -214,11 +203,8 @@ def send_robot_fingers(ser, number):
     if ser is not None and ser.is_open:
         try:
             ser.write(str(safe_number).encode())
-            print(f"Robot shows {safe_number} fingers")
-        except Exception as e:
-            print(f"Serial send failed, simulation fallback: {e}")
-    else:
-        print(f"Simulation mode - robot would show {safe_number} fingers")
+        except Exception:
+            pass
 
 ARDUINO_PORT = "COM4"
 ARDUINO_BAUD_RATE = 9600
@@ -239,6 +225,13 @@ feedback_text = ""
 feedback_color = INFO_COLOR
 last_answer_correct = False
 
+current_level = 1
+consecutive_correct = 0
+consecutive_wrong = 0
+REQUIRED_TO_LEVEL_UP = 2
+REQUIRED_TO_LEVEL_DOWN = 2
+MAX_LEVEL = 4
+
 def play_feedback_audio(text):
     try:
         safe_text = str(text).replace("'", "")
@@ -254,13 +247,17 @@ def play_feedback_audio(text):
         pass
 
 def generate_exercise(operation):
+    global current_level
+    max_val = min(5, 1 + current_level)
+    
     if operation == "ADD":
-        a = random.randint(0, 5)
-        b = random.randint(0, 5)
+        a = random.randint(0, max_val)
+        b = random.randint(0, max_val)
         return a, b, a + b
-    a = random.randint(0, 5)
-    b = random.randint(0, a)
-    return a, b, a - b
+    else:
+        a = random.randint(0, max_val)
+        b = random.randint(0, a)
+        return a, b, a - b
 
 def get_operation_symbol():
     return "+" if selected_operation == "ADD" else "-"
@@ -284,16 +281,46 @@ def go_to_operation_menu():
 
 def check_answer(answer_value):
     global feedback_text, feedback_color, last_answer_correct, state, state_start_time
+    global current_level, consecutive_correct, consecutive_wrong
+    
     if answer_value == correct_answer:
-        feedback_text = "GOOD JOB"
-        feedback_color = GOOD_COLOR
+        consecutive_correct += 1
+        consecutive_wrong = 0
         last_answer_correct = True
-        play_feedback_audio("Good job")
+        feedback_color = GOOD_COLOR
+        
+        if consecutive_correct >= REQUIRED_TO_LEVEL_UP:
+            if current_level < MAX_LEVEL:
+                current_level += 1
+                feedback_text = "CORRECT! LEVEL UP"
+                play_feedback_audio("Correct, level up")
+            else:
+                feedback_text = "CORRECT! MAX LEVEL"
+                play_feedback_audio("Correct, excellent")
+            consecutive_correct = 0
+        else:
+            feedback_text = "CORRECT"
+            play_feedback_audio("Correct")
+            
     else:
-        feedback_text = "TRY AGAIN"
-        feedback_color = BAD_COLOR
+        consecutive_wrong += 1
+        consecutive_correct = 0
         last_answer_correct = False
-        play_feedback_audio("Try again")
+        feedback_color = BAD_COLOR
+        
+        if consecutive_wrong >= REQUIRED_TO_LEVEL_DOWN:
+            if current_level > 1:
+                current_level -= 1
+                feedback_text = "INCORRECT. LEVEL DOWN"
+                play_feedback_audio("Incorrect, level down")
+            else:
+                feedback_text = f"INCORRECT. ANSWER WAS {correct_answer}"
+                play_feedback_audio("Incorrect")
+            consecutive_wrong = 0
+        else:
+            feedback_text = f"INCORRECT. ANSWER WAS {correct_answer}"
+            play_feedback_audio("Incorrect")
+            
     state = "FEEDBACK"
     state_start_time = time.time()
 
@@ -338,7 +365,6 @@ init_voice()
 cap = cv2.VideoCapture(0)
 attempts = 0
 while not cap.isOpened() and attempts < 5:
-    print("Camera busy... waiting 0.5s before retrying...")
     time.sleep(0.5)
     cap = cv2.VideoCapture(0)
     attempts += 1
@@ -372,11 +398,10 @@ try:
                 
             elapsed = current_time - state_start_time
             
-            # UI State Layouts - Compacted to avoid overlap
             if state == "CHOOSE_OPERATION":
                 draw_lines(panel, ["ADDITION / SUBTRACTION"], 50, TITLE_COLOR, scale=1.0, thickness=2)
                 draw_lines(panel, ["Show 1 finger = Addition", "Show 2 fingers = Subtraction"], 100, OPTION_COLOR, scale=0.8, thickness=2, step=30)
-                draw_lines(panel, ["Voice: say PLUS / MINUS", "OK sign = Back to Menu", "Voice: BACK"], 180, NOTE_COLOR, scale=0.7, thickness=2, step=30)
+                draw_lines(panel, ["Voice: say PLUS / MINUS", "OK sign = Back to Education Menu", "Voice: BACK"], 180, NOTE_COLOR, scale=0.7, thickness=2, step=30)
                 
                 desired_action = None
                 if current_ok:
@@ -398,7 +423,7 @@ try:
                     
             elif state == "READY":
                 draw_lines(panel, ["ADDITION / SUBTRACTION"], 50, TITLE_COLOR, scale=1.0, thickness=2)
-                draw_lines(panel, [f"Operation: {get_operation_symbol()}", "Thumbs up = Start game", "Voice: START"], 100, OPTION_COLOR, scale=0.8, thickness=2, step=30)
+                draw_lines(panel, [f"Chosen operation: {get_operation_symbol()}", "Thumbs up = Start game", "Voice: START"], 100, OPTION_COLOR, scale=0.8, thickness=2, step=30)
                 draw_lines(panel, ["OK sign = Back to operation choice", "Voice: BACK"], 200, NOTE_COLOR, scale=0.7, thickness=2, step=30)
                 
                 desired_action = "START" if current_thumbs else ("BACK" if current_ok else None)
@@ -450,8 +475,9 @@ try:
                 draw_lines(panel, [f"{first_number} {get_operation_symbol()} {second_number} = ?"], 100, OPTION_COLOR, scale=1.0, thickness=2)
                 draw_lines(panel, ["Show answer with hands", "Hold your answer for 0.8s", "OK sign = Back to menu", "Voice: BACK"], 160, NOTE_COLOR, scale=0.7, thickness=2, step=30)
                 
+                cv2.putText(panel, f"Level: {current_level} / {MAX_LEVEL}", (30, h - 175), cv2.FONT_HERSHEY_SIMPLEX, 0.75, INFO_COLOR, 2)
+                
                 if current_fingers != -1:
-                    # Dynamically anchored from the bottom
                     cv2.putText(panel, f"Detected fingers: {current_fingers}", (30, h - 140), cv2.FONT_HERSHEY_SIMPLEX, 0.75, INFO_COLOR, 2)
                     if candidate_answer != current_fingers:
                         candidate_answer = current_fingers
@@ -468,7 +494,7 @@ try:
                     go_to_operation_menu()
                     
             elif state == "FEEDBACK":
-                draw_lines(panel, [feedback_text], h // 2 - 20, feedback_color, scale=1.2, thickness=3)
+                draw_lines(panel, [feedback_text], h // 2 - 20, feedback_color, scale=1.0, thickness=3)
                 if elapsed >= FEEDBACK_SECONDS:
                     state = "ROUND_END_MENU"
                     state_start_time = current_time
