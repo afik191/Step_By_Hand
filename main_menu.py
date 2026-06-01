@@ -12,7 +12,9 @@ try:
 except Exception:
     sr = None
 
-
+# -------------------------------------------------
+# Base Paths
+# -------------------------------------------------
 BASE_DIR = Path(__file__).resolve().parent
 
 SCRIPT_RPS = BASE_DIR / "GameMode" / "game_Rock_Paper_Scissors.py"
@@ -21,21 +23,24 @@ SCRIPT_COUNTING = BASE_DIR / "LearningMode" / "countingMode.py"
 SCRIPT_MATH = BASE_DIR / "LearningMode" / "game_Plus_Minus.py"
 SCRIPT_GREATER_SMALLER = BASE_DIR / "LearningMode" / "game_Big_Small.py"
 
+# -------------------------------------------------
+# Menu States
+# -------------------------------------------------
 MAIN_MENU = "MAIN_MENU"
 GAME_MENU = "GAME_MENU"
 LEARNING_MENU = "LEARNING_MENU"
 menu_state = MAIN_MENU
 
+# -------------------------------------------------
+# Timing
+# -------------------------------------------------
 SELECTION_HOLD_SECONDS = 1.5
 RETURN_COOLDOWN = 1.5
 
 # -------------------------------------------------
-# Panel design
+# Panel UI Design Palette
 # -------------------------------------------------
-
-# White instructions panel
 PANEL_BG_COLOR = (255, 255, 255)
-
 TITLE_COLOR = (0, 0, 0)
 OPTION_COLOR = (0, 0, 220)
 NOTE_COLOR = (60, 60, 60)
@@ -43,6 +48,9 @@ HOLD_COLOR = (100, 40, 0)
 STATUS_COLOR = (40, 40, 40)
 DIVIDER_COLOR = (170, 170, 170)
 
+# -------------------------------------------------
+# Globals
+# -------------------------------------------------
 cap = None
 mp_hands = mp.solutions.hands
 mp_drawing = mp.solutions.drawing_utils
@@ -68,14 +76,14 @@ def count_fingers_from_landmarks(hand_landmarks):
 
     fingers = []
 
-    # Thumb
+    # Thumb calculation
     fingers.append(
         1
         if get_dist(hand_landmarks.landmark[4], hand_landmarks.landmark[5]) > hand_scale * 0.6
         else 0
     )
 
-    # Index, middle, ring, pinky
+    # Index, middle, ring, pinky calculation
     tips_idx = [8, 12, 16, 20]
     mips_idx = [6, 10, 14, 18]
 
@@ -112,17 +120,11 @@ def is_ok_gesture(hand_landmarks):
 
 
 def create_split_screen(frame):
-    """
-    Creates two parts:
-    1. camera_view - the real camera image
-    2. panel - clean white panel for instructions
-    """
     camera_view = frame.copy()
-
     panel = frame.copy()
     panel[:] = PANEL_BG_COLOR
 
-    # vertical divider at the left edge of the panel
+    # Draw vertical divider line at the left boundary of the text panel
     panel_h = panel.shape[0]
     cv2.line(panel, (0, 0), (0, panel_h), DIVIDER_COLOR, 3)
 
@@ -284,8 +286,79 @@ def hold_label(action_name):
         "open_math": "PLUS MINUS",
         "open_gs": "GREATER SMALLER",
     }
-
     return labels.get(action_name, action_name)
+
+
+# -------------------------------------------------
+# UI Rendering Functions (Compact Layout)
+# -------------------------------------------------
+
+def draw_main_menu(panel):
+    # Tightly packed at the top to prevent overlap
+    draw_lines(panel, ["MAIN MENU"], 50, TITLE_COLOR, scale=1.2, thickness=3)
+    
+    draw_lines(
+        panel,
+        [
+            "Show 1 finger = Game Mode",
+            "Show 2 fingers = Learning Mode",
+        ],
+        110, OPTION_COLOR, scale=0.85, thickness=2, step=40
+    )
+
+    draw_lines(
+        panel,
+        [
+            "Voice: say GAME or LEARNING",
+            "OK sign = Back (in sub menus)",
+        ],
+        210, NOTE_COLOR, scale=0.7, thickness=2, step=35
+    )
+
+
+def draw_game_menu(panel):
+    draw_lines(panel, ["GAME MODE"], 50, TITLE_COLOR, scale=1.2, thickness=3)
+
+    draw_lines(
+        panel,
+        [
+            "Show 1 finger = Rock Paper Scissors",
+            "Show 2 fingers = Even Odd",
+        ],
+        110, OPTION_COLOR, scale=0.8, thickness=2, step=40
+    )
+
+    draw_lines(
+        panel,
+        [
+            "OK sign = Back to Main Menu",
+            "Voice: ROCK / EVEN / BACK",
+        ],
+        210, NOTE_COLOR, scale=0.7, thickness=2, step=35
+    )
+
+
+def draw_learning_menu(panel):
+    draw_lines(panel, ["LEARNING MODE"], 50, TITLE_COLOR, scale=1.2, thickness=3)
+
+    draw_lines(
+        panel,
+        [
+            "Show 1 finger = Counting / Imitation",
+            "Show 2 fingers = Addition / Subtraction",
+            "Show 3 fingers = Greater / Smaller",
+        ],
+        100, OPTION_COLOR, scale=0.75, thickness=2, step=35
+    )
+
+    draw_lines(
+        panel,
+        [
+            "OK sign = Back to Main Menu",
+            "Voice: COUNTING / MATH / GREATER / BACK",
+        ],
+        220, NOTE_COLOR, scale=0.65, thickness=2, step=30
+    )
 
 
 def draw_hold_status(panel, current_time):
@@ -297,9 +370,9 @@ def draw_hold_status(panel, current_time):
         cv2.putText(
             panel,
             f"Hold action: {hold_label(hold_action)}",
-            (35, h - 120),
+            (35, h - 140), # Positioned higher from the bottom
             cv2.FONT_HERSHEY_SIMPLEX,
-            0.75,
+            0.7,
             HOLD_COLOR,
             2,
         )
@@ -307,20 +380,19 @@ def draw_hold_status(panel, current_time):
         cv2.putText(
             panel,
             f"Hold selection: {progress:.1f}s / {SELECTION_HOLD_SECONDS:.1f}s",
-            (35, h - 85),
+            (35, h - 105),
             cv2.FONT_HERSHEY_SIMPLEX,
-            0.75,
+            0.7,
             HOLD_COLOR,
             2,
         )
-
     else:
         cv2.putText(
             panel,
             "Hold a gesture for 1.5 seconds to select",
-            (35, h - 95),
+            (35, h - 105),
             cv2.FONT_HERSHEY_SIMPLEX,
-            0.75,
+            0.7,
             NOTE_COLOR,
             2,
         )
@@ -329,139 +401,27 @@ def draw_hold_status(panel, current_time):
 def draw_status(panel, current_fingers, voice_text):
     h, _, _ = panel.shape
 
-    if current_fingers != -1:
-        cv2.putText(
-            panel,
-            f"Detected fingers: {current_fingers}",
-            (35, h - 35),
-            cv2.FONT_HERSHEY_SIMPLEX,
-            0.7,
-            STATUS_COLOR,
-            2,
-        )
-
     if voice_text:
         cv2.putText(
             panel,
             f"Voice: {voice_text}",
-            (35, h - 155),
+            (35, h - 65),
             cv2.FONT_HERSHEY_SIMPLEX,
-            0.68,
+            0.65,
             STATUS_COLOR,
             2,
         )
 
-
-def draw_main_menu(panel):
-    draw_lines(
-        panel,
-        ["MAIN MENU"],
-        70,
-        TITLE_COLOR,
-        scale=1.2,
-        thickness=3,
-    )
-
-    draw_lines(
-        panel,
-        [
-            "Show 1 finger = Game Mode",
-            "Show 2 fingers = Learning Mode",
-        ],
-        145,
-        OPTION_COLOR,
-        scale=0.95,
-        thickness=2,
-        step=55,
-    )
-
-    draw_lines(
-        panel,
-        [
-            "Voice: say GAME or LEARNING",
-            "OK sign = Back (in sub menus)",
-        ],
-        280,
-        NOTE_COLOR,
-        scale=0.75,
-        thickness=2,
-        step=40,
-    )
-
-
-def draw_game_menu(panel):
-    draw_lines(
-        panel,
-        ["GAME MODE"],
-        70,
-        TITLE_COLOR,
-        scale=1.2,
-        thickness=3,
-    )
-
-    draw_lines(
-        panel,
-        [
-            "Show 1 finger = Rock Paper Scissors",
-            "Show 2 fingers = Even Odd",
-        ],
-        145,
-        OPTION_COLOR,
-        scale=0.85,
-        thickness=2,
-        step=55,
-    )
-
-    draw_lines(
-        panel,
-        [
-            "OK sign = Back to Main Menu",
-            "Voice: ROCK / EVEN / BACK",
-        ],
-        280,
-        NOTE_COLOR,
-        scale=0.75,
-        thickness=2,
-        step=40,
-    )
-
-
-def draw_learning_menu(panel):
-    draw_lines(
-        panel,
-        ["LEARNING MODE"],
-        70,
-        TITLE_COLOR,
-        scale=1.2,
-        thickness=3,
-    )
-
-    draw_lines(
-        panel,
-        [
-            "Show 1 finger = Counting / Imitation",
-            "Show 2 fingers = Addition / Subtraction",
-            "Show 3 fingers = Greater / Smaller",
-        ],
-        140,
-        OPTION_COLOR,
-        scale=0.78,
-        thickness=2,
-        step=50,
-    )
-
-    draw_lines(
-        panel,
-        [
-            "OK sign = Back to Main Menu",
-            "Voice: COUNTING / MATH / GREATER / BACK",
-        ],
-        310,
-        NOTE_COLOR,
-        scale=0.68,
-        thickness=2,
-        step=40,
-    )
+    if current_fingers != -1:
+        cv2.putText(
+            panel,
+            f"Detected fingers: {current_fingers}",
+            (35, h - 30),
+            cv2.FONT_HERSHEY_SIMPLEX,
+            0.65,
+            STATUS_COLOR,
+            2,
+        )
 
 
 def handle_voice_command(text):
@@ -522,6 +482,9 @@ def handle_voice_command(text):
     return False
 
 
+# -------------------------------------------------
+# Main Execution Loop
+# -------------------------------------------------
 cap = open_camera()
 init_voice()
 
@@ -541,15 +504,12 @@ try:
                 cap = open_camera()
 
             success, frame = cap.read()
-
             if not success:
                 continue
 
             frame = cv2.flip(frame, 1)
 
-            # Split screen:
-            # camera_view = clean camera side
-            # panel = instructions side
+            # Split matrix layout structure
             camera_view, panel = create_split_screen(frame)
 
             rgb_frame = cv2.cvtColor(camera_view, cv2.COLOR_BGR2RGB)
@@ -560,7 +520,7 @@ try:
 
             if results.multi_hand_landmarks:
                 for hand_landmarks in results.multi_hand_landmarks:
-                    # Draw hand landmarks ONLY on camera side
+                    # Keep camera screen visually isolated with landmarker dots
                     mp_drawing.draw_landmarks(
                         camera_view,
                         hand_landmarks,
@@ -575,13 +535,11 @@ try:
 
             while voice_queue:
                 latest_voice = voice_queue.popleft()
-
                 if handle_voice_command(latest_voice):
                     break
 
             if menu_state == MAIN_MENU:
                 draw_main_menu(panel)
-
                 desired_action = None
 
                 if current_time > last_action_time:
@@ -595,14 +553,12 @@ try:
                 if action == "go_game":
                     menu_state = GAME_MENU
                     last_action_time = current_time + 0.2
-
                 elif action == "go_learning":
                     menu_state = LEARNING_MENU
                     last_action_time = current_time + 0.2
 
             elif menu_state == GAME_MENU:
                 draw_game_menu(panel)
-
                 desired_action = None
 
                 if current_time > last_action_time:
@@ -618,12 +574,10 @@ try:
                 if action == "back_main":
                     menu_state = MAIN_MENU
                     last_action_time = current_time + 0.2
-
                 elif action == "open_rps":
                     last_action_time = current_time + 0.2
                     run_mode(SCRIPT_RPS)
                     continue
-
                 elif action == "open_evenodd":
                     last_action_time = current_time + 0.2
                     run_mode(SCRIPT_EVEN_ODD)
@@ -631,7 +585,6 @@ try:
 
             elif menu_state == LEARNING_MENU:
                 draw_learning_menu(panel)
-
                 desired_action = None
 
                 if current_time > last_action_time:
@@ -649,23 +602,20 @@ try:
                 if action == "back_main":
                     menu_state = MAIN_MENU
                     last_action_time = current_time + 0.2
-
                 elif action == "open_counting":
                     last_action_time = current_time + 0.2
                     run_mode(SCRIPT_COUNTING)
                     continue
-
                 elif action == "open_math":
                     last_action_time = current_time + 0.2
                     run_mode(SCRIPT_MATH)
                     continue
-
                 elif action == "open_gs":
                     last_action_time = current_time + 0.2
                     run_mode(SCRIPT_GREATER_SMALLER)
                     continue
 
-            # These are drawn only on the instructions panel
+            # Render panel controls using strictly bound dynamic constraints
             draw_hold_status(panel, current_time)
             draw_status(
                 panel,
@@ -673,11 +623,7 @@ try:
                 latest_voice if voice_enabled else "voice unavailable",
             )
 
-            # Combine camera side + instructions side
             combined_screen = cv2.hconcat([camera_view, panel])
-
-            # Optional resize so the window is not too huge.
-            # You can change this or delete it if you want full size.
             combined_screen = cv2.resize(combined_screen, (1280, 520))
 
             cv2.imshow("Robotic Hand - Main Interface", combined_screen)
