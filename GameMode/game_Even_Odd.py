@@ -30,6 +30,25 @@ HOLD_COLOR = (100, 40, 0)
 GOOD_COLOR = (0, 140, 0)
 BAD_COLOR = (0, 0, 180)
 INFO_COLOR = (50, 50, 50)
+# -------------------------------------------------
+# Split screen display
+# -------------------------------------------------
+
+PANEL_BG_COLOR = (255, 255, 255)
+DIVIDER_COLOR = (170, 170, 170)
+
+
+def create_split_screen(frame):
+    camera_view = frame.copy()
+
+    panel = frame.copy()
+    panel[:] = PANEL_BG_COLOR
+
+    panel_h = panel.shape[0]
+    cv2.line(panel, (0, 0), (0, panel_h), DIVIDER_COLOR, 3)
+
+    return camera_view, panel
+
 
 GESTURE_HOLD_SECONDS = 1.5
 START_HOLD_SECONDS = 1.5
@@ -147,8 +166,8 @@ def draw_hold_status(frame, current_time):
     h, _, _ = frame.shape
     if hold_action:
         progress = min(GESTURE_HOLD_SECONDS, current_time - hold_start_time)
-        cv2.putText(frame, f"Hold action: {hold_action}", (30, h - 92), cv2.FONT_HERSHEY_SIMPLEX, 0.72, HOLD_COLOR, 2)
-        cv2.putText(frame, f"Hold selection: {progress:.1f}s / {GESTURE_HOLD_SECONDS:.1f}s", (30, h - 55), cv2.FONT_HERSHEY_SIMPLEX, 0.72, HOLD_COLOR, 2)
+        cv2.putText(frame, f"Hold action: {hold_action}", (30, h - 115), cv2.FONT_HERSHEY_SIMPLEX, 0.72, HOLD_COLOR, 2)
+        cv2.putText(frame, f"Hold selection: {progress:.1f}s / {GESTURE_HOLD_SECONDS:.1f}s", (30, h - 80), cv2.FONT_HERSHEY_SIMPLEX, 0.72, HOLD_COLOR, 2)
 
 
 def voice_callback(recognizer, audio):
@@ -341,15 +360,16 @@ try:
             if not success:
                 continue
             frame = cv2.flip(frame, 1)
+            camera_view, panel = create_split_screen(frame)
             h, w, _ = frame.shape
-            results = hands.process(cv2.cvtColor(frame, cv2.COLOR_BGR2RGB))
+            results = hands.process(cv2.cvtColor(camera_view, cv2.COLOR_BGR2RGB))
             current_fingers = -1
             current_ok = False
             current_thumbs = False
             current_features = None
             if results.multi_hand_landmarks:
                 for hand_landmarks in results.multi_hand_landmarks:
-                    mp_drawing.draw_landmarks(frame, hand_landmarks, mp_hands.HAND_CONNECTIONS)
+                    mp_drawing.draw_landmarks(camera_view, hand_landmarks, mp_hands.HAND_CONNECTIONS)
                     current_fingers = count_fingers_single_hand(hand_landmarks)
                     current_ok = is_ok_gesture(hand_landmarks)
                     current_thumbs = is_thumbs_up(hand_landmarks)
@@ -360,9 +380,9 @@ try:
             while voice_queue:
                 process_voice_command(voice_queue.popleft())
             if state == "CHOOSE_SIDE":
-                draw_lines(frame, ["CHOOSE YOUR SIDE"], 65, TITLE_COLOR, scale=1.1, thickness=3)
-                draw_lines(frame, ["Show 2 fingers = EVEN", "Show 1 finger = ODD"], 145, OPTION_COLOR, scale=0.95, thickness=2)
-                draw_lines(frame, ["Voice: say EVEN or ODD", "OK sign = Back to Game Menu", "Voice: say BACK"], 255, NOTE_COLOR, scale=0.76, thickness=2, step=40)
+                draw_lines(panel, ["CHOOSE YOUR SIDE"], 65, TITLE_COLOR, scale=1.1, thickness=3)
+                draw_lines(panel, ["Show 2 fingers = EVEN", "Show 1 finger = ODD"], 145, OPTION_COLOR, scale=0.95, thickness=2)
+                draw_lines(panel, ["Voice: say EVEN or ODD", "OK sign = Back to Game Menu", "Voice: say BACK"], 255, NOTE_COLOR, scale=0.76, thickness=2, step=40)
                 desired_action = None
                 if current_ok:
                     desired_action = "BACK"
@@ -381,9 +401,9 @@ try:
                     selected_side = "ODD"
                     state = "READY"
             elif state == "READY":
-                draw_lines(frame, ["EVEN ODD GAME"], 65, TITLE_COLOR, scale=1.1, thickness=3)
-                draw_lines(frame, [f"Your side: {selected_side}", "Thumbs up = Start game", "Voice: say START"], 135, OPTION_COLOR, scale=0.88, thickness=2)
-                draw_lines(frame, ["OK sign = Back to Game Menu", "Voice: say BACK"], 275, NOTE_COLOR, scale=0.76, thickness=2, step=40)
+                draw_lines(panel, ["EVEN ODD GAME"], 65, TITLE_COLOR, scale=1.1, thickness=3)
+                draw_lines(panel, [f"Your side: {selected_side}", "Thumbs up = Start game", "Voice: say START"], 135, OPTION_COLOR, scale=0.88, thickness=2)
+                draw_lines(panel, ["OK sign = Back to Game Menu", "Voice: say BACK"], 275, NOTE_COLOR, scale=0.76, thickness=2, step=40)
                 desired_action = "START" if current_thumbs else ("BACK" if current_ok else None)
                 action, _ = update_hold(desired_action, current_time)
                 if action == "START":
@@ -395,14 +415,16 @@ try:
                 elapsed = current_time - countdown_start
                 remaining = max(0.0, COUNTDOWN_DURATION - elapsed)
                 count = int(math.ceil(remaining))
-                draw_lines(frame, ["EVEN ODD GAME"], 60, TITLE_COLOR, scale=1.05, thickness=3)
-                draw_lines(frame, [f"Side: {selected_side}", "Show your number now"], 115, OPTION_COLOR, scale=0.88, thickness=2)
-                draw_lines(frame, ["Robot predicts before the end", "Result will use your actual final number"], 195, NOTE_COLOR, scale=0.72, thickness=2, step=36)
+                draw_lines(panel, ["EVEN ODD GAME"], 60, TITLE_COLOR, scale=1.05, thickness=3)
+                draw_lines(panel, [f"Side: {selected_side}", "Show your number now"], 115, OPTION_COLOR, scale=0.88, thickness=2)
+                draw_lines(panel, ["Robot predicts before the end", "Result will use your actual final number"], 195, NOTE_COLOR, scale=0.72, thickness=2, step=36)
                 if count > 0:
-                    cv2.putText(frame, str(count), (w // 2 - 45, h // 2), cv2.FONT_HERSHEY_SIMPLEX, 4.6, OPTION_COLOR, 8)
+                    # Countdown stays on the camera side so the instructions panel stays clean.
+                    cv2.putText(camera_view, str(count), (w // 2 - 45, h // 2), cv2.FONT_HERSHEY_SIMPLEX, 4.6, (255, 255, 255), 12)
+                    cv2.putText(camera_view, str(count), (w // 2 - 45, h // 2), cv2.FONT_HERSHEY_SIMPLEX, 4.6, OPTION_COLOR, 8)
                 if current_fingers != -1:
-                    cv2.putText(frame, f"Detected now: {current_fingers}", (30, h - 140), cv2.FONT_HERSHEY_SIMPLEX, 0.8, INFO_COLOR, 2)
-                draw_lines(frame, ["OK sign = Back", "Voice: BACK"], h - 95, NOTE_COLOR, scale=0.72, thickness=2, step=35)
+                    cv2.putText(panel, f"Detected now: {current_fingers}", (30, h - 140), cv2.FONT_HERSHEY_SIMPLEX, 0.8, INFO_COLOR, 2)
+                draw_lines(panel, ["OK sign = Back", "Voice: BACK"], h - 165, NOTE_COLOR, scale=0.72, thickness=2, step=35)
                 desired_action = "BACK" if current_ok else None
                 action, _ = update_hold(desired_action, current_time)
                 if action == "BACK":
@@ -426,24 +448,24 @@ try:
                     candidate_actual_start = 0.0
             elif state == "VERIFY_ACTUAL":
                 elapsed = current_time - verify_start
-                draw_lines(frame, ["FINAL NUMBER CHECK"], 60, TITLE_COLOR, scale=1.1, thickness=3)
-                draw_lines(frame, [f"Robot played: {robot_move}", "Hold your real final number now"], 130, OPTION_COLOR, scale=0.88, thickness=2)
-                draw_lines(frame, [f"Predicted move: {predicted_user_move} ({confidence_percent:.1f}%)", "We now confirm your actual final number"], 215, NOTE_COLOR, scale=0.72, thickness=2, step=36)
+                draw_lines(panel, ["FINAL NUMBER CHECK"], 60, TITLE_COLOR, scale=1.1, thickness=3)
+                draw_lines(panel, [f"Robot played: {robot_move}", "Hold your real final number now"], 130, OPTION_COLOR, scale=0.88, thickness=2)
+                draw_lines(panel, [f"Predicted move: {predicted_user_move} ({confidence_percent:.1f}%)", "We now confirm your actual final number"], 215, NOTE_COLOR, scale=0.72, thickness=2, step=36)
                 if current_fingers != -1:
-                    cv2.putText(frame, f"Detected final number: {current_fingers}", (30, 300), cv2.FONT_HERSHEY_SIMPLEX, 0.82, INFO_COLOR, 2)
+                    cv2.putText(panel, f"Detected final number: {current_fingers}", (30, 300), cv2.FONT_HERSHEY_SIMPLEX, 0.82, INFO_COLOR, 2)
                     if candidate_actual != current_fingers:
                         candidate_actual = current_fingers
                         candidate_actual_start = current_time
                     else:
                         hold = current_time - candidate_actual_start
-                        cv2.putText(frame, f"Stable hold: {hold:.1f}s / {ANSWER_STABLE_SECONDS:.1f}s", (30, 340), cv2.FONT_HERSHEY_SIMPLEX, 0.75, HOLD_COLOR, 2)
+                        cv2.putText(panel, f"Stable hold: {hold:.1f}s / {ANSWER_STABLE_SECONDS:.1f}s", (30, 340), cv2.FONT_HERSHEY_SIMPLEX, 0.75, HOLD_COLOR, 2)
                         if hold >= ANSWER_STABLE_SECONDS:
                             actual_user_move = current_fingers
                             finish_to_result()
                 else:
                     candidate_actual = None
                     candidate_actual_start = 0.0
-                draw_lines(frame, ["OK sign = Back", "Voice: BACK"], h - 95, NOTE_COLOR, scale=0.72, thickness=2, step=35)
+                draw_lines(panel, ["OK sign = Back", "Voice: BACK"], h - 165, NOTE_COLOR, scale=0.72, thickness=2, step=35)
                 desired_action = "BACK" if current_ok else None
                 action, _ = update_hold(desired_action, current_time)
                 if action == "BACK":
@@ -454,10 +476,10 @@ try:
                     finish_to_result()
             elif state == "RESULT":
                 total = actual_user_move + robot_move if actual_user_move >= 0 else "?"
-                draw_lines(frame, ["RESULT"], 60, TITLE_COLOR, scale=1.1, thickness=3)
-                draw_lines(frame, [f"Your side: {selected_side}", f"Predicted move: {predicted_user_move} ({confidence_percent:.1f}%)", f"Actual move: {actual_user_move}", f"Robot played: {robot_move}", f"Total: {total}"], 120, NOTE_COLOR, scale=0.79, thickness=2, step=40)
-                draw_lines(frame, [result_text], 340, result_color, scale=1.08, thickness=3)
-                draw_lines(frame, ["Thumbs up = Start again", "Voice: START", "OK sign = Back to Game Menu", "Voice: BACK"], 390, OPTION_COLOR, scale=0.75, thickness=2, step=35)
+                draw_lines(panel, ["RESULT"], 60, TITLE_COLOR, scale=1.1, thickness=3)
+                draw_lines(panel, [f"Your side: {selected_side}", f"Predicted move: {predicted_user_move} ({confidence_percent:.1f}%)", f"Actual move: {actual_user_move}", f"Robot played: {robot_move}", f"Total: {total}"], 120, NOTE_COLOR, scale=0.79, thickness=2, step=40)
+                draw_lines(panel, [result_text], 340, result_color, scale=1.08, thickness=3)
+                draw_lines(panel, ["Thumbs up = Start again", "Voice: START", "OK sign = Back to Game Menu", "Voice: BACK"], 390, OPTION_COLOR, scale=0.75, thickness=2, step=35)
                 desired_action = "START" if current_thumbs else ("BACK" if current_ok else None)
                 action, _ = update_hold(desired_action, current_time)
                 if action == "START":
@@ -466,8 +488,10 @@ try:
                 elif action == "BACK":
                     send_robot_fingers(ser, 0)
                     sys.exit(BACK_EXIT_CODE)
-            draw_hold_status(frame, current_time)
-            cv2.imshow("Predictive Even-Odd Game - Voice + Gesture", frame)
+            draw_hold_status(panel, current_time)
+            combined_screen = cv2.hconcat([camera_view, panel])
+            combined_screen = cv2.resize(combined_screen, (1280, 520))
+            cv2.imshow("Predictive Even-Odd Game - Voice + Gesture", combined_screen)
             if cv2.waitKey(1) & 0xFF == ord('q'):
                 break
 finally:

@@ -30,6 +30,25 @@ HOLD_COLOR = (100, 40, 0)
 GOOD_COLOR = (0, 140, 0)
 BAD_COLOR = (0, 0, 180)
 INFO_COLOR = (50, 50, 50)
+# -------------------------------------------------
+# Split screen display
+# -------------------------------------------------
+
+PANEL_BG_COLOR = (255, 255, 255)
+DIVIDER_COLOR = (170, 170, 170)
+
+
+def create_split_screen(frame):
+    camera_view = frame.copy()
+
+    panel = frame.copy()
+    panel[:] = PANEL_BG_COLOR
+
+    panel_h = panel.shape[0]
+    cv2.line(panel, (0, 0), (0, panel_h), DIVIDER_COLOR, 3)
+
+    return camera_view, panel
+
 
 GESTURE_HOLD_SECONDS = 1.5
 START_HOLD_SECONDS = 1.5
@@ -147,8 +166,8 @@ def draw_hold_status(frame, current_time):
     h, _, _ = frame.shape
     if hold_action:
         progress = min(GESTURE_HOLD_SECONDS, current_time - hold_start_time)
-        cv2.putText(frame, f"Hold action: {hold_action}", (30, h - 92), cv2.FONT_HERSHEY_SIMPLEX, 0.72, HOLD_COLOR, 2)
-        cv2.putText(frame, f"Hold selection: {progress:.1f}s / {GESTURE_HOLD_SECONDS:.1f}s", (30, h - 55), cv2.FONT_HERSHEY_SIMPLEX, 0.72, HOLD_COLOR, 2)
+        cv2.putText(frame, f"Hold action: {hold_action}", (30, h - 115), cv2.FONT_HERSHEY_SIMPLEX, 0.72, HOLD_COLOR, 2)
+        cv2.putText(frame, f"Hold selection: {progress:.1f}s / {GESTURE_HOLD_SECONDS:.1f}s", (30, h - 80), cv2.FONT_HERSHEY_SIMPLEX, 0.72, HOLD_COLOR, 2)
 
 
 def voice_callback(recognizer, audio):
@@ -352,22 +371,23 @@ try:
             if not success:
                 continue
             frame = cv2.flip(frame, 1)
+            camera_view, panel = create_split_screen(frame)
             h, w, _ = frame.shape
-            results = hands.process(cv2.cvtColor(frame, cv2.COLOR_BGR2RGB))
+            results = hands.process(cv2.cvtColor(camera_view, cv2.COLOR_BGR2RGB))
             all_hand_landmarks = results.multi_hand_landmarks if results.multi_hand_landmarks else []
             current_fingers = count_fingers_two_hands(all_hand_landmarks)
             current_ok = any(is_ok_gesture(hand) for hand in all_hand_landmarks) if all_hand_landmarks else False
             current_thumbs = any(is_thumbs_up(hand) for hand in all_hand_landmarks) if all_hand_landmarks else False
             for hand_landmarks in all_hand_landmarks:
-                mp_drawing.draw_landmarks(frame, hand_landmarks, mp_hands.HAND_CONNECTIONS)
+                mp_drawing.draw_landmarks(camera_view, hand_landmarks, mp_hands.HAND_CONNECTIONS)
             current_time = time.time()
             while voice_queue:
                 process_voice_command(voice_queue.popleft())
             elapsed = current_time - state_start_time
             if state == "CHOOSE_OPERATION":
-                draw_lines(frame, ["MATH MODE"], 65, TITLE_COLOR, scale=1.15, thickness=3)
-                draw_lines(frame, ["Show 1 finger = Addition", "Show 2 fingers = Subtraction"], 145, OPTION_COLOR, scale=0.95, thickness=2)
-                draw_lines(frame, ["Voice: say PLUS / MINUS", "OK sign = Back to Education Menu", "Voice: BACK"], 260, NOTE_COLOR, scale=0.76, thickness=2, step=40)
+                draw_lines(panel, ["ADDITION / SUBTRACTION"], 65, TITLE_COLOR, scale=1.15, thickness=3)
+                draw_lines(panel, ["Show 1 finger = Addition", "Show 2 fingers = Subtraction"], 145, OPTION_COLOR, scale=0.95, thickness=2)
+                draw_lines(panel, ["Voice: say PLUS / MINUS", "OK sign = Back to Education Menu", "Voice: BACK"], 260, NOTE_COLOR, scale=0.76, thickness=2, step=40)
                 desired_action = None
                 if current_ok:
                     desired_action = "BACK"
@@ -386,9 +406,9 @@ try:
                     selected_operation = "SUB"
                     state = "READY"
             elif state == "READY":
-                draw_lines(frame, ["MATH MODE"], 65, TITLE_COLOR, scale=1.1, thickness=3)
-                draw_lines(frame, [f"Chosen operation: {get_operation_symbol()}", "Thumbs up = Start game", "Voice: START"], 145, OPTION_COLOR, scale=0.88, thickness=2)
-                draw_lines(frame, ["OK sign = Back to operation choice", "Voice: BACK"], 275, NOTE_COLOR, scale=0.76, thickness=2, step=40)
+                draw_lines(panel, ["ADDITION / SUBTRACTION"], 65, TITLE_COLOR, scale=1.1, thickness=3)
+                draw_lines(panel, [f"Chosen operation: {get_operation_symbol()}", "Thumbs up = Start game", "Voice: START"], 145, OPTION_COLOR, scale=0.88, thickness=2)
+                draw_lines(panel, ["OK sign = Back to operation choice", "Voice: BACK"], 275, NOTE_COLOR, scale=0.76, thickness=2, step=40)
                 desired_action = "START" if current_thumbs else ("BACK" if current_ok else None)
                 action, _ = update_hold(desired_action, current_time)
                 if action == "START":
@@ -396,9 +416,9 @@ try:
                 elif action == "BACK":
                     go_to_operation_menu()
             elif state == "SHOW_FIRST":
-                draw_lines(frame, ["WATCH THE ROBOT"], 65, TITLE_COLOR, scale=1.1, thickness=3)
-                draw_lines(frame, [f"First number: {first_number}"], 155, OPTION_COLOR, scale=1.0, thickness=2)
-                draw_lines(frame, [f"Operation: {get_operation_symbol()}", "OK sign = Back to operation choice", "Voice: BACK"], 240, NOTE_COLOR, scale=0.76, thickness=2, step=40)
+                draw_lines(panel, ["WATCH THE ROBOT"], 65, TITLE_COLOR, scale=1.1, thickness=3)
+                draw_lines(panel, [f"First number: {first_number}"], 155, OPTION_COLOR, scale=1.0, thickness=2)
+                draw_lines(panel, [f"Operation: {get_operation_symbol()}", "OK sign = Back to operation choice", "Voice: BACK"], 240, NOTE_COLOR, scale=0.76, thickness=2, step=40)
                 desired_action = "BACK" if current_ok else None
                 action, _ = update_hold(desired_action, current_time)
                 if action == "BACK":
@@ -408,15 +428,15 @@ try:
                     state = "GAP"
                     state_start_time = current_time
             elif state == "GAP":
-                draw_lines(frame, ["GET READY FOR THE NEXT NUMBER"], h // 2, NOTE_COLOR, scale=0.85, thickness=2)
+                draw_lines(panel, ["GET READY FOR THE NEXT NUMBER"], h // 2, NOTE_COLOR, scale=0.85, thickness=2)
                 if elapsed >= ROBOT_GAP_SECONDS:
                     send_robot_fingers(ser, second_number)
                     state = "SHOW_SECOND"
                     state_start_time = current_time
             elif state == "SHOW_SECOND":
-                draw_lines(frame, ["WATCH THE ROBOT"], 65, TITLE_COLOR, scale=1.1, thickness=3)
-                draw_lines(frame, [f"Second number: {second_number}"], 155, OPTION_COLOR, scale=1.0, thickness=2)
-                draw_lines(frame, [f"Question: {first_number} {get_operation_symbol()} {second_number} = ?", "OK sign = Back to operation choice", "Voice: BACK"], 240, NOTE_COLOR, scale=0.76, thickness=2, step=40)
+                draw_lines(panel, ["WATCH THE ROBOT"], 65, TITLE_COLOR, scale=1.1, thickness=3)
+                draw_lines(panel, [f"Second number: {second_number}"], 155, OPTION_COLOR, scale=1.0, thickness=2)
+                draw_lines(panel, [f"Question: {first_number} {get_operation_symbol()} {second_number} = ?", "OK sign = Back to operation choice", "Voice: BACK"], 240, NOTE_COLOR, scale=0.76, thickness=2, step=40)
                 desired_action = "BACK" if current_ok else None
                 action, _ = update_hold(desired_action, current_time)
                 if action == "BACK":
@@ -428,17 +448,17 @@ try:
                     state = "WAIT_FOR_ANSWER"
                     state_start_time = current_time
             elif state == "WAIT_FOR_ANSWER":
-                draw_lines(frame, ["SOLVE THE EXERCISE"], 65, TITLE_COLOR, scale=1.1, thickness=3)
-                draw_lines(frame, [f"{first_number} {get_operation_symbol()} {second_number} = ?"], 140, OPTION_COLOR, scale=1.0, thickness=2)
-                draw_lines(frame, ["Show the answer with 1 or 2 hands", "OK sign = Back to operation choice", "Voice: BACK"], 215, NOTE_COLOR, scale=0.76, thickness=2, step=40)
+                draw_lines(panel, ["SOLVE THE EXERCISE"], 65, TITLE_COLOR, scale=1.1, thickness=3)
+                draw_lines(panel, [f"{first_number} {get_operation_symbol()} {second_number} = ?"], 140, OPTION_COLOR, scale=1.0, thickness=2)
+                draw_lines(panel, ["Show the answer with 1 or 2 hands", "Hold your answer for 0.8 seconds", "OK sign = Back to operation choice", "Voice: BACK"], 215, NOTE_COLOR, scale=0.76, thickness=2, step=40)
                 if current_fingers != -1:
-                    cv2.putText(frame, f"Detected fingers: {current_fingers}", (30, 340), cv2.FONT_HERSHEY_SIMPLEX, 0.82, INFO_COLOR, 2)
+                    cv2.putText(panel, f"Detected fingers: {current_fingers}", (30, 330), cv2.FONT_HERSHEY_SIMPLEX, 0.82, INFO_COLOR, 2)
                     if candidate_answer != current_fingers:
                         candidate_answer = current_fingers
                         candidate_start_time = current_time
                     else:
                         hold = current_time - candidate_start_time
-                        cv2.putText(frame, f"Answer hold: {hold:.1f}s / {ANSWER_STABLE_SECONDS:.1f}s", (30, 380), cv2.FONT_HERSHEY_SIMPLEX, 0.75, HOLD_COLOR, 2)
+                        cv2.putText(panel, f"Answer hold: {hold:.1f}s / {ANSWER_STABLE_SECONDS:.1f}s", (30, 365), cv2.FONT_HERSHEY_SIMPLEX, 0.75, HOLD_COLOR, 2)
                         if hold >= ANSWER_STABLE_SECONDS:
                             check_answer(current_fingers)
                 desired_action = "BACK" if current_ok else None
@@ -446,15 +466,15 @@ try:
                 if action == "BACK":
                     go_to_operation_menu()
             elif state == "FEEDBACK":
-                draw_lines(frame, [feedback_text], h // 2 - 20, feedback_color, scale=1.4, thickness=4)
+                draw_lines(panel, [feedback_text], h // 2 - 20, feedback_color, scale=1.4, thickness=4)
                 if elapsed >= FEEDBACK_SECONDS:
                     state = "ROUND_END_MENU"
                     state_start_time = current_time
             elif state == "ROUND_END_MENU":
-                draw_lines(frame, ["ROUND FINISHED"], 65, TITLE_COLOR, scale=1.1, thickness=3)
-                draw_lines(frame, [feedback_text], 135, feedback_color, scale=1.0, thickness=3)
+                draw_lines(panel, ["ROUND FINISHED"], 65, TITLE_COLOR, scale=1.1, thickness=3)
+                draw_lines(panel, [feedback_text], 135, feedback_color, scale=1.0, thickness=3)
                 msg = "Thumbs up = Next exercise" if last_answer_correct else "Thumbs up = Try again"
-                draw_lines(frame, [msg, "Voice: START", "OK sign = Back to operation choice", "Voice: BACK"], 220, OPTION_COLOR, scale=0.78, thickness=2, step=40)
+                draw_lines(panel, [msg, "Voice: START", "OK sign = Back to operation choice", "Voice: BACK"], 220, OPTION_COLOR, scale=0.78, thickness=2, step=40)
                 desired_action = "START" if current_thumbs else ("BACK" if current_ok else None)
                 action, _ = update_hold(desired_action, current_time)
                 if action == "START":
@@ -467,8 +487,10 @@ try:
                         state_start_time = current_time
                 elif action == "BACK":
                     go_to_operation_menu()
-            draw_hold_status(frame, current_time)
-            cv2.imshow("Math Mode - Addition and Subtraction", frame)
+            draw_hold_status(panel, current_time)
+            combined_screen = cv2.hconcat([camera_view, panel])
+            combined_screen = cv2.resize(combined_screen, (1280, 520))
+            cv2.imshow("Math Mode - Addition and Subtraction", combined_screen)
             if cv2.waitKey(1) & 0xFF == ord('q'):
                 break
 finally:

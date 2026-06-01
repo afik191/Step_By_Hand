@@ -40,6 +40,25 @@ HOLD_COLOR = (100, 40, 0)      # dark brown/blue-ish in BGR
 GOOD_COLOR = (0, 140, 0)       # dark green
 BAD_COLOR = (0, 0, 180)        # dark red
 INFO_COLOR = (45, 45, 45)      # dark gray
+# -------------------------------------------------
+# Split screen display
+# -------------------------------------------------
+
+PANEL_BG_COLOR = (255, 255, 255)
+DIVIDER_COLOR = (170, 170, 170)
+
+
+def create_split_screen(frame):
+    camera_view = frame.copy()
+
+    panel = frame.copy()
+    panel[:] = PANEL_BG_COLOR
+
+    panel_h = panel.shape[0]
+    cv2.line(panel, (0, 0), (0, panel_h), DIVIDER_COLOR, 3)
+
+    return camera_view, panel
+
 
 NUMBER_WORDS = {
     "ZERO": 0,
@@ -251,7 +270,7 @@ def draw_hold_status(frame, current_time):
         cv2.putText(
             frame,
             f"Hold action: {hold_action}",
-            (30, h - 90),
+            (30, h - 115),
             cv2.FONT_HERSHEY_SIMPLEX,
             0.7,
             HOLD_COLOR,
@@ -260,7 +279,7 @@ def draw_hold_status(frame, current_time):
         cv2.putText(
             frame,
             f"Hold: {progress:.1f}s / {GESTURE_HOLD_SECONDS:.1f}s",
-            (30, h - 55),
+            (30, h - 80),
             cv2.FONT_HERSHEY_SIMPLEX,
             0.7,
             HOLD_COLOR,
@@ -499,9 +518,10 @@ try:
                 continue
 
             frame = cv2.flip(frame, 1)
+            camera_view, panel = create_split_screen(frame)
             h, w, _ = frame.shape
 
-            rgb_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+            rgb_frame = cv2.cvtColor(camera_view, cv2.COLOR_BGR2RGB)
             results = hands.process(rgb_frame)
 
             current_fingers = -1
@@ -510,7 +530,7 @@ try:
 
             if results.multi_hand_landmarks:
                 for hand_landmarks in results.multi_hand_landmarks:
-                    mp_drawing.draw_landmarks(frame, hand_landmarks, mp_hands.HAND_CONNECTIONS)
+                    mp_drawing.draw_landmarks(camera_view, hand_landmarks, mp_hands.HAND_CONNECTIONS)
                     current_fingers = count_fingers_from_landmarks(hand_landmarks)
                     current_ok = is_ok_gesture(hand_landmarks)
                     current_thumbs = is_thumbs_up(hand_landmarks)
@@ -524,9 +544,9 @@ try:
             # READY
             # -----------------------------
             if state == "READY":
-                draw_lines(frame, ["COUNTING / IMITATION"], 65, TITLE_COLOR, scale=1.1, thickness=3)
+                draw_lines(panel, ["COUNTING / IMITATION"], 65, TITLE_COLOR, scale=1.1, thickness=3)
                 draw_lines(
-                    frame,
+                    panel,
                     ["Thumbs up = Start learning", "Voice: say START"],
                     150,
                     OPTION_COLOR,
@@ -535,7 +555,7 @@ try:
                     step=45,
                 )
                 draw_lines(
-                    frame,
+                    panel,
                     ["OK sign = Back to Education Menu", "Voice: say BACK"],
                     260,
                     NOTE_COLOR,
@@ -557,8 +577,8 @@ try:
             # WAIT_FOR_USER
             # -----------------------------
             elif state == "WAIT_FOR_USER":
-                draw_lines(frame, ["COPY THE ROBOT"], 65, TITLE_COLOR, scale=1.1, thickness=3)
-                draw_lines(frame, [f"Robot shows: {target_number}"], 145, OPTION_COLOR, scale=1.0, thickness=2)
+                draw_lines(panel, ["COPY THE ROBOT"], 65, TITLE_COLOR, scale=1.1, thickness=3)
+                draw_lines(panel, [f"Robot shows: {target_number}"], 145, OPTION_COLOR, scale=1.0, thickness=2)
 
                 instructions = [
                     "Show the same number with your fingers",
@@ -566,13 +586,13 @@ try:
                     "OK sign = Back to Education Menu",
                     "Voice: BACK",
                 ]
-                draw_lines(frame, instructions, 215, NOTE_COLOR, scale=0.72, thickness=2, step=36)
+                draw_lines(panel, instructions, 215, NOTE_COLOR, scale=0.72, thickness=2, step=36)
 
                 if current_fingers != -1:
                     cv2.putText(
-                        frame,
+                        panel,
                         f"Detected fingers: {current_fingers}",
-                        (30, 375),
+                        (30, 335),
                         cv2.FONT_HERSHEY_SIMPLEX,
                         0.8,
                         INFO_COLOR,
@@ -585,9 +605,9 @@ try:
                     else:
                         finger_hold = current_time - candidate_start_time
                         cv2.putText(
-                            frame,
+                            panel,
                             f"Finger hold: {finger_hold:.1f}s / {ANSWER_STABLE_SECONDS:.1f}s",
-                            (30, 415),
+                            (30, 375),
                             cv2.FONT_HERSHEY_SIMPLEX,
                             0.72,
                             HOLD_COLOR,
@@ -599,9 +619,9 @@ try:
 
                 if spoken_number is not None:
                     cv2.putText(
-                        frame,
+                        panel,
                         f"Heard number: {spoken_number}",
-                        (30, 455),
+                        (30, 415),
                         cv2.FONT_HERSHEY_SIMPLEX,
                         0.8,
                         INFO_COLOR,
@@ -609,9 +629,9 @@ try:
                     )
                 elif heard_text:
                     cv2.putText(
-                        frame,
+                        panel,
                         f"Heard: {heard_text}",
-                        (30, 455),
+                        (30, 415),
                         cv2.FONT_HERSHEY_SIMPLEX,
                         0.65,
                         INFO_COLOR,
@@ -628,9 +648,9 @@ try:
                             go_to_feedback(stable_finger_answer, spoken_number)
                         else:
                             cv2.putText(
-                                frame,
+                                panel,
                                 "Waiting for voice number...",
-                                (30, 495),
+                                (30, 455),
                                 cv2.FONT_HERSHEY_SIMPLEX,
                                 0.72,
                                 HOLD_COLOR,
@@ -650,7 +670,7 @@ try:
             # FEEDBACK
             # -----------------------------
             elif state == "FEEDBACK":
-                draw_lines(frame, [feedback_text], h // 2 - 30, feedback_color, scale=0.95, thickness=3)
+                draw_lines(panel, [feedback_text], h // 2 - 30, feedback_color, scale=0.95, thickness=3)
 
                 if current_time - feedback_start_time >= FEEDBACK_SECONDS:
                     state = "ROUND_END_MENU"
@@ -659,17 +679,17 @@ try:
             # ROUND_END_MENU
             # -----------------------------
             elif state == "ROUND_END_MENU":
-                draw_lines(frame, ["ROUND FINISHED"], 65, TITLE_COLOR, scale=1.1, thickness=3)
-                draw_lines(frame, [feedback_text], 135, feedback_color, scale=0.9, thickness=3)
+                draw_lines(panel, ["ROUND FINISHED"], 65, TITLE_COLOR, scale=1.1, thickness=3)
+                draw_lines(panel, [feedback_text], 135, feedback_color, scale=0.9, thickness=3)
                 draw_lines(
-                    frame,
+                    panel,
                     [
                         "Thumbs up = Start again",
                         "Voice: say START",
                         "OK sign = Back to Education Menu",
                         "Voice: say BACK",
                     ],
-                    235,
+                    215,
                     OPTION_COLOR,
                     scale=0.78,
                     thickness=2,
@@ -685,13 +705,13 @@ try:
                     send_robot_fingers(0)
                     sys.exit(BACK_EXIT_CODE)
 
-            draw_hold_status(frame, current_time)
+            draw_hold_status(panel, current_time)
 
             if current_fingers != -1:
                 cv2.putText(
-                    frame,
+                    panel,
                     f"Detected: {current_fingers}",
-                    (30, h - 20),
+                    (30, h - 35),
                     cv2.FONT_HERSHEY_SIMPLEX,
                     0.65,
                     INFO_COLOR,
@@ -700,16 +720,17 @@ try:
 
             if SIMULATION_MODE:
                 cv2.putText(
-                    frame,
+                    panel,
                     "Arduino: simulation mode",
-                    (30, 35),
+                    (30, h - 150),
                     cv2.FONT_HERSHEY_SIMPLEX,
                     0.65,
                     NOTE_COLOR,
                     2,
                 )
-
-            cv2.imshow("Learning Mode - Count with Robot", frame)
+            combined_screen = cv2.hconcat([camera_view, panel])
+            combined_screen = cv2.resize(combined_screen, (1280, 520))
+            cv2.imshow("Learning Mode - Count with Robot", combined_screen)
 
             if cv2.waitKey(1) & 0xFF == ord("q"):
                 break
