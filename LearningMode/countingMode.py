@@ -4,8 +4,15 @@ import math
 import time
 import random
 from collections import deque
+from pathlib import Path
 
 import mediapipe as mp
+# Add the project root so shared modules can be imported from subfolders.
+PROJECT_ROOT = Path(__file__).resolve().parent.parent
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
+
+from voice_instructions import VoiceInstructions
 
 try:
     import speech_recognition as sr
@@ -84,6 +91,7 @@ hold_start_time = 0.0
 voice_queue = deque()
 stop_listening = None
 voice_enabled = False
+voice_guide = VoiceInstructions()
 
 SIMULATION_MODE = False
 ser = None
@@ -214,6 +222,8 @@ def send_robot_fingers(number):
 # -------------------------------------------------
 
 def voice_callback(recognizer, audio):
+    if voice_guide.is_speaking:
+        return
     try:
         command = recognizer.recognize_google(audio, language="en-US").upper()
         voice_queue.append(command)
@@ -295,6 +305,18 @@ def process_voice_command(command):
         if number is not None:
             spoken_number = number
 
+
+def get_spoken_instruction():
+    if state == "READY":
+        return "Counting and imitation. Show thumbs up, or say start, to begin. Make an O K sign, or say back, to return."
+    if state == "WAIT_FOR_USER":
+        return f"The robot is showing {target_number}. Show the same number with your fingers and say the number out loud."
+    if state == "FEEDBACK":
+        return feedback_text.replace("GOOD JOB", "Good job").replace("TRY AGAIN", "Try again")
+    if state == "ROUND_END_MENU":
+        return "Round finished. Show thumbs up, or say start, to play again. Say back to return."
+    return ""
+
 # -------------------------------------------------
 # Init & Main Loop
 # -------------------------------------------------
@@ -340,7 +362,6 @@ try:
 
             current_time = time.time()
             while voice_queue: process_voice_command(voice_queue.popleft())
-
             # Top Simulation Indicator
             if SIMULATION_MODE:
                 cv2.putText(panel, "SIMULATION MODE", (30, 25), cv2.FONT_HERSHEY_SIMPLEX, 0.6, NOTE_COLOR, 2)
@@ -403,17 +424,30 @@ try:
                 if action == "START": start_round()
                 elif action == "BACK": send_robot_fingers(0); sys.exit(BACK_EXIT_CODE)
 
+            voice_guide.announce(state, get_spoken_instruction())
+
             draw_hold_status(panel, current_time)
 
             combined_screen = cv2.hconcat([camera_view, panel])
             combined_screen = cv2.resize(combined_screen, (1280, 520))
-            cv2.imshow("Learning Mode - Count with Robot", combined_screen)
+            window_name = "Learning Mode - Count with Robot"
+            cv2.imshow(window_name, combined_screen)
+            key = cv2.waitKey(1) & 0xFF
+            if key in (ord("q"), 27):
+                break
+            try:
+                if cv2.getWindowProperty(window_name, cv2.WND_PROP_VISIBLE) < 1:
+                    break
+            except cv2.error:
+                break
 
-            if cv2.waitKey(1) & 0xFF == ord("q"): break
+except KeyboardInterrupt:
+    print("\nClosing game...")
 
 finally:
     send_robot_fingers(0)
     stop_voice()
+    voice_guide.stop()
     cap.release()
     cv2.destroyAllWindows()
     if ser is not None and ser.is_open: ser.close()

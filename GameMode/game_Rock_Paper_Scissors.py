@@ -7,6 +7,12 @@ import pickle
 from pathlib import Path
 from collections import deque
 import mediapipe as mp
+# Add the project root so shared modules can be imported from subfolders.
+PROJECT_ROOT = Path(__file__).resolve().parent.parent
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
+
+from voice_instructions import VoiceInstructions
 
 try:
     import sklearn
@@ -54,6 +60,7 @@ ANSWER_STABLE_SECONDS = 0.8
 voice_queue = deque()
 stop_listening = None
 voice_enabled = False
+voice_guide = VoiceInstructions()
 hold_action = None
 hold_start_time = 0.0
 
@@ -123,6 +130,8 @@ def draw_hold_status(frame, current_time):
         cv2.putText(frame, f"Hold selection: {progress:.1f}s / {GESTURE_HOLD_SECONDS:.1f}s", (30, h - 30), cv2.FONT_HERSHEY_SIMPLEX, 0.7, HOLD_COLOR, 2)
 
 def voice_callback(recognizer, audio):
+    if voice_guide.is_speaking:
+        return
     try:
         command = recognizer.recognize_google(audio, language="en-US").upper()
         voice_queue.append(command)
@@ -240,6 +249,18 @@ def process_voice_command(command):
         return True
     return False
 
+
+def get_spoken_instruction():
+    if state == "READY":
+        return "Rock paper scissors. Show thumbs up, or say start, to begin. Rock is a closed hand, paper is five fingers, and scissors is two fingers. Say back to return."
+    if state == "COUNTDOWN":
+        return "Get ready. Show your rock, paper, or scissors move before the countdown ends."
+    if state == "VERIFY_ACTUAL":
+        return f"The robot played {robot_move.lower()}. Hold your final move steady."
+    if state == "RESULT":
+        return f"{result_text}. The robot played {robot_move.lower()}, and your move was {actual_user_move.lower()}. Show thumbs up, or say start, to play again."
+    return ""
+
 mp_hands = mp.solutions.hands
 mp_drawing = mp.solutions.drawing_utils
 model = None
@@ -294,7 +315,6 @@ try:
 
             current_time = time.time()
             while voice_queue: process_voice_command(voice_queue.popleft())
-
             if state == "READY":
                 draw_lines(panel, ["ROCK PAPER SCISSORS"], 40, TITLE_COLOR, scale=1.0, thickness=2)
                 draw_lines(panel, ["Thumbs up = Start game", "Voice: say START"], 90, OPTION_COLOR, scale=0.75, thickness=2, step=30)
@@ -371,13 +391,27 @@ try:
                 if action == "START": send_robot_fingers(ser, 0); start_round()
                 elif action == "BACK": send_robot_fingers(ser, 0); sys.exit(BACK_EXIT_CODE)
                     
+            voice_guide.announce(state, get_spoken_instruction())
+
             draw_hold_status(panel, current_time)
             combined_screen = cv2.hconcat([camera_view, panel])
             combined_screen = cv2.resize(combined_screen, (1280, 520))
-            cv2.imshow("Predictive Rock Paper Scissors - Voice + Gesture", combined_screen)
-            if cv2.waitKey(1) & 0xFF == ord('q'): break
+            window_name = "Predictive Rock Paper Scissors - Voice + Gesture"
+            cv2.imshow(window_name, combined_screen)
+            key = cv2.waitKey(1) & 0xFF
+            if key in (ord("q"), 27):
+                break
+            try:
+                if cv2.getWindowProperty(window_name, cv2.WND_PROP_VISIBLE) < 1:
+                    break
+            except cv2.error:
+                break
+except KeyboardInterrupt:
+    print("\nClosing game...")
+
 finally:
     stop_voice()
+    voice_guide.stop()
     send_robot_fingers(ser, 0)
     cap.release()
     cv2.destroyAllWindows()

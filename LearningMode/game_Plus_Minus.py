@@ -7,6 +7,12 @@ import subprocess
 from pathlib import Path
 from collections import deque
 import mediapipe as mp
+# Add the project root so shared modules can be imported from subfolders.
+PROJECT_ROOT = Path(__file__).resolve().parent.parent
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
+
+from voice_instructions import VoiceInstructions
 
 try:
     import speech_recognition as sr
@@ -49,6 +55,7 @@ ANSWER_STABLE_SECONDS = 0.8
 voice_queue = deque()
 stop_listening = None
 voice_enabled = False
+voice_guide = VoiceInstructions()
 hold_action = None
 hold_start_time = 0.0
 
@@ -153,6 +160,8 @@ def draw_hold_status(frame, current_time):
         cv2.putText(frame, f"Hold selection: {progress:.1f}s / {GESTURE_HOLD_SECONDS:.1f}s", (30, h - 30), cv2.FONT_HERSHEY_SIMPLEX, 0.7, HOLD_COLOR, 2)
 
 def voice_callback(recognizer, audio):
+    if voice_guide.is_speaking:
+        return
     try:
         command = recognizer.recognize_google(audio, language="en-US").upper()
         voice_queue.append(command)
@@ -208,8 +217,8 @@ def send_robot_fingers(ser, number):
 
 ARDUINO_PORT = "COM4"
 ARDUINO_BAUD_RATE = 9600
-ROBOT_SHOW_SECONDS = 2.0
-ROBOT_GAP_SECONDS = 0.6
+ROBOT_SHOW_SECONDS = 3.5
+ROBOT_GAP_SECONDS = 1.0
 FEEDBACK_SECONDS = 2.0
 BACK_EXIT_CODE = 10
 
@@ -357,6 +366,30 @@ def process_voice_command(command):
         return True
     return False
 
+
+def get_spoken_instruction():
+    if state == "CHOOSE_OPERATION":
+        return "Addition and subtraction. Show one finger for addition, or two fingers for subtraction. Say plus or minus. Say back to return."
+    if state == "READY":
+        operation_name = "addition" if selected_operation == "ADD" else "subtraction"
+        return f"You selected {operation_name}. Show thumbs up, or say start, to begin. Say back to choose again."
+    if state == "SHOW_FIRST":
+        return f"First number: {first_number}."
+    if state == "GAP":
+        return "Get ready for the second number."
+    if state == "SHOW_SECOND":
+        operation_word = "plus" if selected_operation == "ADD" else "minus"
+        return f"Second number: {second_number}. The exercise is {first_number} {operation_word} {second_number}."
+    if state == "WAIT_FOR_ANSWER":
+        operation_word = "plus" if selected_operation == "ADD" else "minus"
+        return f"Solve {first_number} {operation_word} {second_number}. Show the answer with your hands and hold it steady."
+    if state == "FEEDBACK":
+        return feedback_text.replace("ANSWER WAS", "The answer was")
+    if state == "ROUND_END_MENU":
+        action = "continue to the next exercise" if last_answer_correct else "try the exercise again"
+        return f"Round finished. Show thumbs up, or say start, to {action}. Say back to return."
+    return ""
+
 mp_hands = mp.solutions.hands
 mp_drawing = mp.solutions.drawing_utils
 ser = init_serial_connection(ARDUINO_PORT, ARDUINO_BAUD_RATE)
@@ -397,7 +430,6 @@ try:
                 process_voice_command(voice_queue.popleft())
                 
             elapsed = current_time - state_start_time
-            
             if state == "CHOOSE_OPERATION":
                 draw_lines(panel, ["ADDITION / SUBTRACTION"], 50, TITLE_COLOR, scale=1.0, thickness=2)
                 draw_lines(panel, ["Show 1 finger = Addition", "Show 2 fingers = Subtraction"], 100, OPTION_COLOR, scale=0.8, thickness=2, step=30)
@@ -518,15 +550,27 @@ try:
                 elif action == "BACK":
                     go_to_operation_menu()
                     
+            voice_guide.announce(state, get_spoken_instruction())
+
             draw_hold_status(panel, current_time)
             combined_screen = cv2.hconcat([camera_view, panel])
             combined_screen = cv2.resize(combined_screen, (1280, 520))
-            cv2.imshow("Math Mode - Addition and Subtraction", combined_screen)
-            
-            if cv2.waitKey(1) & 0xFF == ord('q'):
+            window_name = "Math Mode - Addition and Subtraction"
+            cv2.imshow(window_name, combined_screen)
+            key = cv2.waitKey(1) & 0xFF
+            if key in (ord("q"), 27):
                 break
+            try:
+                if cv2.getWindowProperty(window_name, cv2.WND_PROP_VISIBLE) < 1:
+                    break
+            except cv2.error:
+                break
+except KeyboardInterrupt:
+    print("\nClosing game...")
+
 finally:
     stop_voice()
+    voice_guide.stop()
     send_robot_fingers(ser, 0)
     cap.release()
     cv2.destroyAllWindows()

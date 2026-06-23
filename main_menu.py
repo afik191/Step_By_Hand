@@ -6,6 +6,7 @@ import subprocess
 from pathlib import Path
 from collections import deque
 import mediapipe as mp
+from voice_instructions import VoiceInstructions
 
 try:
     import speech_recognition as sr
@@ -58,6 +59,7 @@ mp_drawing = mp.solutions.drawing_utils
 voice_queue = deque()
 stop_listening = None
 voice_enabled = False
+voice_guide = VoiceInstructions()
 hold_action = None
 hold_start_time = 0.0
 last_action_time = 0.0
@@ -145,6 +147,8 @@ def draw_lines(frame, lines, start_y, color, scale=0.9, thickness=2, step=50):
 
 
 def voice_callback(recognizer, audio):
+    if voice_guide.is_speaking:
+        return
     try:
         text = recognizer.recognize_google(audio, language="en-US").upper()
         voice_queue.append(text)
@@ -230,22 +234,40 @@ def run_mode(script_path):
         return
 
     print(f"Opening mode: {script_path.name}")
-
     stop_voice()
+    voice_guide.reset()
     release_camera()
 
-    result = subprocess.run(
-        [sys.executable, str(script_path)],
-        cwd=str(script_path.parent),
-    )
+    process = None
+    try:
+        process = subprocess.Popen(
+            [sys.executable, str(script_path)],
+            cwd=str(script_path.parent),
+        )
+        while process.poll() is None:
+            try:
+                process.wait(timeout=0.2)
+            except subprocess.TimeoutExpired:
+                continue
+        return_code = process.returncode
+    except KeyboardInterrupt:
+        print("\nClosing game process...")
+        if process is not None and process.poll() is None:
+            try:
+                process.terminate()
+                process.wait(timeout=2)
+            except Exception:
+                try:
+                    process.kill()
+                except Exception:
+                    pass
+        return_code = -1
 
-    print(f"Mode finished with return code: {result.returncode}")
-
-    time.sleep(0.6)
-
+    print(f"Mode finished with return code: {return_code}")
+    time.sleep(0.4)
     cap = open_camera()
     init_voice()
-
+    voice_guide.reset()
     hold_action = None
     hold_start_time = 0.0
     last_action_time = time.time() + RETURN_COOLDOWN
@@ -288,6 +310,23 @@ def hold_label(action_name):
     }
     return labels.get(action_name, action_name)
 
+
+
+def get_spoken_menu_instruction():
+    if menu_state == MAIN_MENU:
+        return (
+            "Main menu. Show one finger for game mode, or two fingers for learning mode. "
+            "You can also say game or learning."
+        )
+    if menu_state == GAME_MENU:
+        return (
+            "Game mode. Show one finger for rock paper scissors, or two fingers for even odd. "
+            "Make an O K sign, or say back, to return to the main menu."
+        )
+    return (
+        "Learning mode. Show one finger for counting and imitation, two fingers for addition and subtraction, "
+        "or three fingers for greater and smaller. Make an O K sign, or say back, to return."
+    )
 
 # -------------------------------------------------
 # UI Rendering Functions (Compact Layout)
@@ -538,6 +577,8 @@ try:
                 if handle_voice_command(latest_voice):
                     break
 
+            voice_guide.announce(menu_state, get_spoken_menu_instruction())
+
             if menu_state == MAIN_MENU:
                 draw_main_menu(panel)
                 desired_action = None
@@ -625,13 +666,22 @@ try:
 
             combined_screen = cv2.hconcat([camera_view, panel])
             combined_screen = cv2.resize(combined_screen, (1280, 520))
-
-            cv2.imshow("Robotic Hand - Main Interface", combined_screen)
-
-            if cv2.waitKey(1) & 0xFF == ord("q"):
+            window_name = "Robotic Hand - Main Interface"
+            cv2.imshow(window_name, combined_screen)
+            key = cv2.waitKey(1) & 0xFF
+            if key in (ord("q"), 27):
                 break
+            try:
+                if cv2.getWindowProperty(window_name, cv2.WND_PROP_VISIBLE) < 1:
+                    break
+            except cv2.error:
+                break
+
+except KeyboardInterrupt:
+    print("\nClosing main menu...")
 
 finally:
     stop_voice()
+    voice_guide.stop()
     release_camera()
     print("Main Menu Closed")
