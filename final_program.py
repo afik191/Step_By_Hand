@@ -186,8 +186,9 @@ class VoiceInstructions:
 BASE_DIR = Path(__file__).resolve().parent
 GAME_DIR = BASE_DIR / "GameMode"
 
-MODEL_EVEN_ODD = GAME_DIR / "hand_predictor.pkl"
-MODEL_RPS = GAME_DIR / "rps_predictor.pkl" if (GAME_DIR / "rps_predictor.pkl").exists() else MODEL_EVEN_ODD
+# Use the workspace-level models directory for the predictors
+MODEL_EVEN_ODD = BASE_DIR / "models" / "hand_predictor.pkl"
+MODEL_RPS = BASE_DIR / "models" / "rps_predictor.pkl" if (BASE_DIR / "models" / "rps_predictor.pkl").exists() else MODEL_EVEN_ODD
 
 
 # =========================================================
@@ -209,7 +210,7 @@ GESTURE_HOLD_SECONDS = 1.5
 ANSWER_STABLE_SECONDS = 0.8
 RETURN_COOLDOWN = 1.5
 BACK_EXIT_CODE = 10
-ARDUINO_PORT = "COM3"
+ARDUINO_PORT = "COM4"
 ARDUINO_BAUD_RATE = 9600
 
 ROBOT_SHOW_SECONDS = 3.5
