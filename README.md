@@ -2,34 +2,35 @@
 
 ## Overview
 
-`Even-Odd Project` is an interactive Python-based learning and game application that uses computer vision to recognize hand gestures and fingers. The project includes a main menu launcher and two mode categories:
+Even-Odd Project is an interactive Python application that uses computer vision and hand-gesture recognition to run educational and game activities. The project currently includes a full interactive experience in `final_program.py`, along with a separate menu launcher in `main_menu.py`.
 
-- `GameMode` for interactive games
-- `LearningMode` for educational hand-gesture activities
+## Main Features
 
-The app is built around OpenCV and MediaPipe for real-time camera input and gesture detection.
-
-## Features
-
-- Hand gesture recognition using MediaPipe
-- Real-time camera interface with a menu-driven experience
-- Multiple games and learning activities
+- Real-time hand tracking with OpenCV and MediaPipe
+- Gesture-based menu navigation
+- Interactive games in the GameMode folder
+- Learning activities in the LearningMode folder
 - Optional voice control support via `speech_recognition`
-- Optional Arduino/serial integration for robot finger output
+- Optional Arduino/serial output for external hardware
 
 ## Project Structure
 
-- `main_menu.py` - Main launcher for the entire application
+- `final_program.py` - Main interactive app with the full game and learning flow
+- `main_menu.py` - Alternate launcher/menu version
+- `voice_instructions.py` - Shared voice instruction helper
 - `GameMode/`
-  - `game_Even_Odd.py` - Even/Odd gesture game
+  - `game_Even_Odd.py` - Even/Odd hand-gesture game
   - `game_Rock_Paper_Scissors.py` - Rock-Paper-Scissors game
-  - `train_predictor_second.py` - Training or predictor utility
+  - `train_predictor_second.py` - Model training/prediction utility
 - `LearningMode/`
-  - `countingMode.py` - Finger counting mode
-  - `game_Plus_Minus.py` - Math plus/minus learning game
-  - `game_Big_Small.py` - Big/Small finger gesture comparison game
-- `aruduino_skech/`
-  - Arduino sketch files for external hardware integration
+  - `countingMode.py` - Counting and imitation activity
+  - `game_Plus_Minus.py` - Addition/subtraction learning game
+  - `game_Big_Small.py` - Greater/smaller comparison game
+- `models/`
+  - `hand_landmarker.task` - MediaPipe hand landmark model
+  - `hand_predictor.pkl` - Predictor model used by the app
+  - `hand_predictor_one.pkl` - Additional predictor model file
+- `aruduino_skech/` - Arduino sketch files for hardware integration
 
 ## Requirements
 
@@ -40,7 +41,7 @@ The project is intended to run on Python 3.x with the following libraries:
 - `numpy`
 - `speechrecognition` (optional)
 - `pyserial` (optional)
-- `scikit-learn` (optional; used for model loading in game mode)
+- `scikit-learn` (optional, used for model loading)
 
 ## Installation
 
@@ -50,7 +51,7 @@ The project is intended to run on Python 3.x with the following libraries:
    python -m venv venv
    venv\Scripts\activate
    ```
-3. Install required packages:
+3. Install the core packages:
    ```bash
    pip install opencv-python mediapipe numpy
    ```
@@ -61,17 +62,24 @@ The project is intended to run on Python 3.x with the following libraries:
 
 ## Usage
 
-1. Open a terminal in the project root folder.
-2. Run the main launcher:
-   ```bash
-   python main_menu.py
-   ```
-3. Use hand gestures in front of your camera to navigate the menu and play games.
+Run the main application from the project root:
+
+```bash
+python final_program.py
+```
+
+You can also try the older launcher:
+
+```bash
+python main_menu.py
+```
+
+Use your hand gestures in front of the camera to navigate the menus and play the activities.
 
 ## Notes
 
-- Voice control is optional and only works if the `speech_recognition` package and a working microphone are available.
-- Arduino/serial support is optional and only enabled if the `pyserial` package is installed and a compatible device is connected.
-- If dependencies are missing, the application generally falls back to camera-based gesture controls.
+- Voice control is optional and only works if `speech_recognition` is installed and a microphone is available.
+- Arduino/serial support is optional and only enabled when `pyserial` is installed and a compatible device is connected.
+- If required dependencies are missing, the app may fall back to basic gesture-based interaction.
 
 
