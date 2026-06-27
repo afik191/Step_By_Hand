@@ -2,30 +2,27 @@
 
 ## Overview
 
-Even-Odd Project is an interactive Python application that uses computer vision and hand-gesture recognition to run educational and game activities. The project currently includes a full interactive experience in `final_program.py`, along with a separate menu launcher in `main_menu.py`.
+Even-Odd Project is an interactive Python application that uses computer vision and hand-gesture recognition to run educational and game activities. The main integrated experience is implemented in `final_program.py`.
 
 ## Main Features
 
 - Real-time hand tracking with OpenCV and MediaPipe
+- Full integrated game and learning flow in `final_program.py`
 - Gesture-based menu navigation
-- Interactive games in the GameMode folder
-- Learning activities in the LearningMode folder
 - Optional voice control support via `speech_recognition`
 - Optional Arduino/serial output for external hardware
 
 ## Project Structure
 
 - `final_program.py` - Main interactive app with the full game and learning flow
-- `main_menu.py` - Alternate launcher/menu version
 - `voice_instructions.py` - Shared voice instruction helper
-- `GameMode/`
-  - `game_Even_Odd.py` - Even/Odd hand-gesture game
-  - `game_Rock_Paper_Scissors.py` - Rock-Paper-Scissors game
+- `GameMode/` and `LearningMode/` - supporting game and learning modules used by the app
+  - `game_Even_Odd.py` - Even/Odd hand-gesture game module
+  - `game_Rock_Paper_Scissors.py` - Rock-Paper-Scissors game module
   - `train_predictor_second.py` - Model training/prediction utility
-- `LearningMode/`
-  - `countingMode.py` - Counting and imitation activity
-  - `game_Plus_Minus.py` - Addition/subtraction learning game
-  - `game_Big_Small.py` - Greater/smaller comparison game
+  - `countingMode.py` - Counting and imitation activity module
+  - `game_Plus_Minus.py` - Addition/subtraction learning game module
+  - `game_Big_Small.py` - Greater/smaller comparison game module
 - `models/`
   - `hand_landmarker.task` - MediaPipe hand landmark model
   - `hand_predictor.pkl` - Predictor model used by the app
@@ -66,12 +63,6 @@ Run the main application from the project root:
 
 ```bash
 python final_program.py
-```
-
-You can also try the older launcher:
-
-```bash
-python main_menu.py
 ```
 
 Use your hand gestures in front of the camera to navigate the menus and play the activities.
