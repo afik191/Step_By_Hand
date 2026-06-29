@@ -12,6 +12,7 @@ from collections import deque
 
 import mediapipe as mp
 
+# Safely import optional dependencies so the app won't crash if they are missing
 try:
     import speech_recognition as sr
 except Exception:
@@ -37,6 +38,7 @@ except Exception:
 # Shared voice helper
 # =========================================================
 class VoiceInstructions:
+    # Manages text-to-speech in a background thread to keep the video feed smooth
     def __init__(self, enabled=True, rate=-1, volume=95):
         self.enabled = enabled
         self.rate = max(-10, min(10, int(rate)))
@@ -61,6 +63,8 @@ class VoiceInstructions:
         return self._speaking.is_set() or not self._queue.empty()
 
     def announce(self, key, text, force=False):
+        # Queues a new phrase and stops whatever is currently playing
+        # The key prevents repeating the same phrase constantly
         if not self.enabled or self._stopped.is_set() or not text:
             return
         text = str(text).strip()
@@ -107,6 +111,7 @@ class VoiceInstructions:
                 break
 
     def _cancel_current_speech(self):
+        # Safely terminates the background text-to-speech process
         with self._process_lock:
             process = self._current_process
             self._current_process = None
@@ -132,6 +137,7 @@ class VoiceInstructions:
             self._speak_windows(generation, text)
 
     def _speak_windows(self, generation, text):
+        # Uses built-in Windows PowerShell for text-to-speech
         if generation != self._generation or self._stopped.is_set():
             return
         safe_text = text.replace("'", "''")
@@ -186,7 +192,7 @@ class VoiceInstructions:
 BASE_DIR = Path(__file__).resolve().parent
 GAME_DIR = BASE_DIR / "GameMode"
 
-# Use the workspace-level models directory for the predictors
+# Load the machine learning predictors for gestures
 MODEL_EVEN_ODD = BASE_DIR / "models" / "hand_predictor.pkl"
 MODEL_RPS = BASE_DIR / "models" / "rps_predictor.pkl" if (BASE_DIR / "models" / "rps_predictor.pkl").exists() else MODEL_EVEN_ODD
 
@@ -194,6 +200,7 @@ MODEL_RPS = BASE_DIR / "models" / "rps_predictor.pkl" if (BASE_DIR / "models" / 
 # =========================================================
 # UI constants
 # =========================================================
+# Visual configuration and timings for the interface
 PANEL_BG_COLOR = (255, 255, 255)
 DIVIDER_COLOR = (170, 170, 170)
 TITLE_COLOR = (0, 0, 0)
@@ -236,6 +243,7 @@ SCREEN_MATH = "SCREEN_MATH"
 # Shared utilities
 # =========================================================
 def create_split_screen(frame):
+    # Splits the window into camera view and text panel
     camera_view = frame.copy()
     panel = frame.copy()
     panel[:] = PANEL_BG_COLOR
@@ -258,6 +266,7 @@ def limit_robot_fingers(number):
 
 
 def count_fingers_single_hand(hand_landmarks):
+    # Counts how many fingers are up based on landmark geometry
     wrist = hand_landmarks.landmark[0]
     hand_scale = get_dist(wrist, hand_landmarks.landmark[9])
     if hand_scale <= 0:
@@ -289,6 +298,7 @@ def count_fingers_two_hands(all_hand_landmarks):
 
 
 def is_ok_gesture(hand_landmarks):
+    # Detects the OK sign (thumb and index closed together)
     wrist = hand_landmarks.landmark[0]
     hand_scale = get_dist(wrist, hand_landmarks.landmark[9])
     if hand_scale <= 0:
@@ -306,6 +316,7 @@ def is_ok_gesture(hand_landmarks):
 
 
 def is_thumbs_up(hand_landmarks):
+    # Detects a thumbs up sign
     wrist = hand_landmarks.landmark[0]
     hand_scale = get_dist(wrist, hand_landmarks.landmark[9])
     if hand_scale <= 0:
@@ -327,6 +338,7 @@ def is_thumbs_up(hand_landmarks):
 
 
 def update_hold(desired_action, current_time):
+    # Acts as a timer to ensure the user holds a gesture before triggering an action
     global hold_action, hold_start_time
     if desired_action is None:
         hold_action = None
@@ -380,13 +392,28 @@ def voice_callback(recognizer, audio):
     if voice_guide.is_speaking:
         return
     try:
+        # Attempt to translate the audio to text
         text = recognizer.recognize_google(audio, language="en-US").upper()
+        
+        # Log successful recognition cleanly to the console
+        print(f"\n[🎙️ VOICE INPUT] Success: '{text}'")
+        
         voice_queue.append(text)
-    except Exception:
-        pass
-
+        
+    except sr.UnknownValueError:
+        # Triggers if it heard sound (like a cough, background noise, or mumbling) but couldn't make out English words
+        print("\n[🎙️ VOICE INPUT] Detected sound, but could not understand the words.")
+        
+    except sr.RequestError as e:
+        # Triggers if you lose internet connection or Google API blocks the request
+        print(f"\n[🎙️ VOICE INPUT] Network/API Error: {e}")
+        
+    except Exception as e:
+        # Catch-all for any other unexpected errors
+        print(f"\n[🎙️ VOICE INPUT] Unexpected Error: {e}")
 
 def init_voice():
+    # Initializes the microphone listening thread
     global stop_listening, voice_enabled
     voice_enabled = False
     stop_listening = None
@@ -426,6 +453,7 @@ ser = None
 
 
 def init_serial_connection(port=ARDUINO_PORT, baud_rate=ARDUINO_BAUD_RATE):
+    # Connects to the Arduino. Falls back to simulation mode if hardware is missing.
     global SIMULATION_MODE
     if serial is None:
         SIMULATION_MODE = True
@@ -476,6 +504,7 @@ def load_models():
 # Detection helpers for predictive games
 # =========================================================
 def extract_prediction_features(hand_landmarks, previous_distances):
+    # Extracts hand proportions and movement speeds to feed into the prediction models
     wrist = hand_landmarks.landmark[0]
     hand_scale = get_dist(wrist, hand_landmarks.landmark[9])
     if hand_scale <= 0:
@@ -493,13 +522,12 @@ def extract_prediction_features(hand_landmarks, previous_distances):
 # =========================================================
 # Global app state
 # =========================================================
+# Track the current active menu or game state
 current_screen = MAIN_MENU
 previous_menu_screen = MAIN_MENU
 hold_action = None
 hold_start_time = 0.0
 last_action_time = 0.0
-
-# Menu state uses current_screen only.
 
 # RPS state
 ROBOT_COMMANDS = {"ROCK": 0, "PAPER": 5, "SCISSORS": 2}
@@ -615,6 +643,7 @@ def back_to_previous_menu():
 # Game-specific helpers
 # =========================================================
 def parse_number_from_voice(command):
+    # Extracts spoken digits or number words from voice commands
     command = command.upper()
     for digit in range(0, 6):
         if str(digit) in command:
@@ -794,6 +823,7 @@ def gs_go_to_mode_menu():
 
 
 def gs_check_answer(answer_value):
+    # Handles dynamic difficulty by updating the level based on correct or wrong answers
     global gs_feedback_text, gs_feedback_color, gs_last_answer_correct, gs_state, gs_state_start_time
     global gs_current_level, gs_consecutive_correct, gs_consecutive_wrong
     if answer_value == gs_correct_answer:
@@ -901,6 +931,7 @@ def math_check_answer(answer_value):
 # Voice instruction content
 # =========================================================
 def get_voice_payload():
+    # Prepares the dynamic text string to be read aloud based on the current screen
     if current_screen == MAIN_MENU:
         return (
             (current_screen,),
@@ -991,6 +1022,7 @@ def get_voice_payload():
 # Voice command routing
 # =========================================================
 def handle_voice_command(command):
+    # Processes spoken commands to navigate the interface or perform actions
     global current_screen, last_action_time
     global even_selected_side, even_state
     global count_spoken_number, count_heard_text
@@ -1238,6 +1270,7 @@ def render_learning_menu(panel, current_time, current_fingers, ok_detected):
 
 
 def render_rps(panel, camera_view, current_time, hand_landmarks_list, first_hand_landmarks, current_fingers_single, current_ok, current_thumbs, h, w):
+    # Handles logic and UI updates for Rock Paper Scissors mode
     global rps_state, rps_countdown_start, rps_candidate_actual, rps_candidate_actual_start, rps_actual_user_move
     global rps_prev_distances, rps_locked_features, rps_has_predicted, rps_verify_start, rps_robot_move, rps_predicted_user_move, rps_confidence_percent
 
@@ -1333,6 +1366,7 @@ def render_rps(panel, camera_view, current_time, hand_landmarks_list, first_hand
 
 
 def render_even_odd(panel, camera_view, current_time, all_hand_landmarks, first_hand_landmarks, current_fingers_single, current_fingers_two, current_ok, current_thumbs, h, w):
+    # Handles logic and UI updates for the Even/Odd mode
     global even_state, even_selected_side, even_prev_distances, even_locked_features, even_has_predicted
     global even_predicted_user_move, even_robot_move, even_confidence_percent, even_verify_start, even_candidate_actual
     global even_candidate_actual_start, even_actual_user_move
@@ -1437,6 +1471,7 @@ def render_even_odd(panel, camera_view, current_time, all_hand_landmarks, first_
 
 
 def render_counting(panel, current_time, current_fingers_single, current_ok, current_thumbs, h):
+    # Handles logic and UI updates for the Counting learning mode
     global count_state, count_candidate_fingers, count_candidate_start_time, count_stable_finger_answer
 
     if SIMULATION_MODE:
@@ -1504,6 +1539,7 @@ def render_counting(panel, current_time, current_fingers_single, current_ok, cur
 
 
 def render_big_small(panel, current_time, all_hand_landmarks, current_fingers_two, current_ok, current_thumbs, h):
+    # Handles logic and UI updates for the Greater/Smaller learning mode
     global gs_state, gs_selected_mode, gs_candidate_answer, gs_candidate_start_time, gs_state_start_time
     elapsed = current_time - gs_state_start_time
 
@@ -1617,6 +1653,7 @@ def render_big_small(panel, current_time, all_hand_landmarks, current_fingers_tw
 
 
 def render_math(panel, current_time, all_hand_landmarks, current_fingers_two, current_ok, current_thumbs, h):
+    # Handles logic and UI updates for the Math (Addition/Subtraction) mode
     global math_state, math_selected_operation, math_candidate_answer, math_candidate_start_time, math_state_start_time
     elapsed = current_time - math_state_start_time
 
@@ -1733,6 +1770,7 @@ def render_math(panel, current_time, all_hand_landmarks, current_fingers_two, cu
 # Main
 # =========================================================
 def main():
+    # Initializes all systems and contains the main application loop
     global ser
     init_voice()
     ser = init_serial_connection()
@@ -1766,6 +1804,8 @@ def main():
                 results = hands.process(cv2.cvtColor(camera_view, cv2.COLOR_BGR2RGB))
                 all_hand_landmarks = results.multi_hand_landmarks if results.multi_hand_landmarks else []
                 first_hand_landmarks = all_hand_landmarks[0] if all_hand_landmarks else None
+                
+                # Analyze gestures from the hands detected
                 current_fingers_single = count_fingers_single_hand(first_hand_landmarks) if first_hand_landmarks is not None else -1
                 current_fingers_two = count_fingers_two_hands(all_hand_landmarks)
                 current_ok = any(is_ok_gesture(hand) for hand in all_hand_landmarks) if all_hand_landmarks else False
@@ -1778,6 +1818,7 @@ def main():
                 while voice_queue:
                     handle_voice_command(voice_queue.popleft())
 
+                # Route to the appropriate rendering function based on the current active screen
                 if current_screen == MAIN_MENU:
                     render_main_menu(panel, current_time, current_fingers_single, current_ok)
                 elif current_screen == GAME_MENU:
