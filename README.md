@@ -1,33 +1,41 @@
-# Even-Odd Project
+# Step By Hand
 
 ## Overview
 
-Even-Odd Project is an interactive Python application that uses computer vision and hand-gesture recognition to run educational and game activities. The main integrated experience is implemented in `final_program.py`.
+Step By Hand is an interactive Python project that uses computer vision and hand-gesture recognition to power a small educational experience. The main application is implemented in `final_program.py`.
 
 ## Main Features
 
 - Real-time hand tracking with OpenCV and MediaPipe
-- Full integrated game and learning flow in `final_program.py`
-- Gesture-based menu navigation
+- A main menu with two modes: Game Mode and Learning Mode
+- Gesture-based navigation and interaction
 - Optional voice control support via `speech_recognition`
 - Optional Arduino/serial output for external hardware
 
 ## Project Structure
 
-- `final_program.py` - Main interactive app with the full game and learning flow
-- `voice_instructions.py` - Shared voice instruction helper
-- `GameMode/` and `LearningMode/` - supporting game and learning modules used by the app
-  - `game_Even_Odd.py` - Even/Odd hand-gesture game module
-  - `game_Rock_Paper_Scissors.py` - Rock-Paper-Scissors game module
-  - `train_predictor_second.py` - Model training/prediction utility
-  - `countingMode.py` - Counting and imitation activity module
-  - `game_Plus_Minus.py` - Addition/subtraction learning game module
-  - `game_Big_Small.py` - Greater/smaller comparison game module
-- `models/`
-  - `hand_landmarker.task` - MediaPipe hand landmark model
-  - `hand_predictor.pkl` - Predictor model used by the app
-  - `hand_predictor_one.pkl` - Additional predictor model file
-- `aruduino_skech/` - Arduino sketch files for hardware integration
+The current workspace contains the following files and folders:
+
+- `final_program.py` - Main application entry point. It contains the full interface logic for the menu system, Game Mode, and Learning Mode.
+- `voice_instructions.py` - Shared helper for voice prompts and speech output.
+- `models/` - Contains the hand landmark model and predictor files used by the app.
+  - `hand_landmarker.task`
+  - `hand_predictor.pkl`
+  - `hand_predictor_one.pkl`
+- `aruduino_skech/` - Arduino sketch folder for optional hardware integration.
+  - `aruduino_skech.ino`
+
+### Modes in the app
+
+- Game Mode
+  - Rock Paper Scissors
+  - Even/Odd
+- Learning Mode
+  - Counting / Imitation
+  - Plus / Minus
+  - Greater / Smaller
+
+> The current repository does not contain separate `GameMode/` or `LearningMode/` folders. Those activities are implemented inside `final_program.py` as different screens and states.
 
 ## Requirements
 
