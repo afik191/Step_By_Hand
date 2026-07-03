@@ -3,6 +3,7 @@
 ## Overview
 
 Step By Hand is an interactive Python project that uses computer vision and hand-gesture recognition to power a small educational experience. The main application is implemented in `final_program.py`.
+YouTube Link: https://youtu.be/rZDtoZ4lcIM
 
 ## Main Features
 

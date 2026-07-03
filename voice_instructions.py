@@ -10,6 +10,7 @@ import threading
 
 
 class VoiceInstructions:
+     # Initializes the voice instruction system and starts the speech worker thread.
     def __init__(self, enabled=True, rate=-1, volume=95):
         self.enabled = enabled
         self.rate = max(-10, min(10, int(rate)))
@@ -24,10 +25,12 @@ class VoiceInstructions:
         self._worker = threading.Thread(target=self._run, daemon=True)
         self._worker.start()
 
+    # Returns True while the system is currently speaking.
     @property
     def is_speaking(self):
         return self._speaking.is_set()
 
+    # Queues a new voice instruction and prevents repeating the same instruction unnecessarily.
     def announce(self, key, text, force=False):
         if not self.enabled or self._stopped.is_set() or not text:
             return
@@ -43,6 +46,7 @@ class VoiceInstructions:
         self._clear_pending()
         self._queue.put((generation, text))
 
+    # Repeats a voice instruction immediately, even if it was already spoken before.    
     def repeat(self, text):
         if not self.enabled or self._stopped.is_set() or not text:
             return
@@ -55,9 +59,11 @@ class VoiceInstructions:
         self._clear_pending()
         self._queue.put((generation, text))
 
+    # Resets the last spoken instruction key so the same instruction can be spoken again.
     def reset(self):
         self._last_key = None
 
+    # Stops the voice instruction system and clears all pending speech.
     def stop(self):
         if self._stopped.is_set():
             return
@@ -67,6 +73,7 @@ class VoiceInstructions:
         self._clear_pending()
         self._queue.put(None)
 
+    # Clears all pending voice instructions from the queue.
     def _clear_pending(self):
         while True:
             try:
@@ -74,6 +81,7 @@ class VoiceInstructions:
             except queue.Empty:
                 break
 
+    # Stops the currently running text-to-speech process.
     def _cancel_current_speech(self):
         with self._process_lock:
             process = self._current_process
@@ -89,6 +97,7 @@ class VoiceInstructions:
             except Exception:
                 pass
 
+    # Runs the background speech worker that processes queued voice instructions.
     def _run(self):
         while True:
             item = self._queue.get()
@@ -99,6 +108,7 @@ class VoiceInstructions:
                 continue
             self._speak_windows(generation, text)
 
+    # Uses Windows PowerShell text-to-speech to read the instruction aloud.
     def _speak_windows(self, generation, text):
         if generation != self._generation or self._stopped.is_set():
             return

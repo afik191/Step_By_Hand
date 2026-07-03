@@ -242,6 +242,7 @@ SCREEN_MATH = "SCREEN_MATH"
 # =========================================================
 # Shared utilities
 # =========================================================
+# Splits the frame into two parts: the camera feed and a white information panel.
 def create_split_screen(frame):
     # Splits the window into camera view and text panel
     camera_view = frame.copy()
@@ -251,20 +252,20 @@ def create_split_screen(frame):
     cv2.line(panel, (0, 0), (0, panel_h), DIVIDER_COLOR, 3)
     return camera_view, panel
 
-
+# Draws multiple lines of text on the given frame starting from a specific Y position.
 def draw_lines(frame, lines, start_y, color, scale=0.9, thickness=2, step=35):
     for i, line in enumerate(lines):
         cv2.putText(frame, line, (30, start_y + i * step), cv2.FONT_HERSHEY_SIMPLEX, scale, color, thickness)
 
-
+# Calculates the Euclidean distance between two MediaPipe landmark points for hand scaling and gesture detection (and determine which finger). 
 def get_dist(p1, p2):
     return math.hypot(p1.x - p2.x, p1.y - p2.y)
 
-
+# Limits the number sent to the robot so it always stays between 0 and 5 fingers.
 def limit_robot_fingers(number):
     return max(0, min(5, int(number)))
 
-
+# Counts how many fingers are raised on a single detected hand.
 def count_fingers_single_hand(hand_landmarks):
     # Counts how many fingers are up based on landmark geometry
     wrist = hand_landmarks.landmark[0]
@@ -281,7 +282,7 @@ def count_fingers_single_hand(hand_landmarks):
         fingers.append(1 if mip_dist > 0 and tip_dist / mip_dist > 1.15 else 0)
     return limit_robot_fingers(sum(fingers))
 
-
+# Counts the total number of raised fingers across two detected hands.
 def count_fingers_two_hands(all_hand_landmarks):
     if not all_hand_landmarks:
         return -1
@@ -296,7 +297,7 @@ def count_fingers_two_hands(all_hand_landmarks):
         return -1
     return max(0, min(10, total))
 
-
+# Detects whether the user is making an OK gesture.
 def is_ok_gesture(hand_landmarks):
     # Detects the OK sign (thumb and index closed together)
     wrist = hand_landmarks.landmark[0]
@@ -314,7 +315,7 @@ def is_ok_gesture(hand_landmarks):
 
     return thumb_index_dist < hand_scale * 0.35 and is_open(12, 10) and is_open(16, 14) and is_open(20, 18)
 
-
+# Detects whether the user is making a thumbs-up gesture.
 def is_thumbs_up(hand_landmarks):
     # Detects a thumbs up sign
     wrist = hand_landmarks.landmark[0]
@@ -336,7 +337,7 @@ def is_thumbs_up(hand_landmarks):
     pinky_open = is_finger_open(20, 18)
     return thumb_open and not index_open and not middle_open and not ring_open and not pinky_open
 
-
+# Updates the gesture hold timer and confirms an action only after the gesture is held long enough.
 def update_hold(desired_action, current_time):
     # Acts as a timer to ensure the user holds a gesture before triggering an action
     global hold_action, hold_start_time
@@ -356,7 +357,7 @@ def update_hold(desired_action, current_time):
         return action, elapsed
     return None, elapsed
 
-
+# Displays the current hold action and hold progress on the panel.
 def draw_hold_status(frame, current_time):
     h, _, _ = frame.shape
     if hold_action:
@@ -364,7 +365,7 @@ def draw_hold_status(frame, current_time):
         cv2.putText(frame, f"Hold action: {hold_action}", (30, h - 60), cv2.FONT_HERSHEY_SIMPLEX, 0.7, HOLD_COLOR, 2)
         cv2.putText(frame, f"Hold selection: {progress:.1f}s / {GESTURE_HOLD_SECONDS:.1f}s", (30, h - 30), cv2.FONT_HERSHEY_SIMPLEX, 0.7, HOLD_COLOR, 2)
 
-
+# Converts an internal action name into a readable label for the user interface.
 def hold_label(action_name):
     labels = {
         "go_game": "GAME MODE",
@@ -387,7 +388,7 @@ stop_listening = None
 voice_enabled = False
 voice_guide = VoiceInstructions()
 
-
+# Handles recognized voice input and adds it to the command queue.
 def voice_callback(recognizer, audio):
     if voice_guide.is_speaking:
         return
@@ -412,6 +413,7 @@ def voice_callback(recognizer, audio):
         # Catch-all for any other unexpected errors
         print(f"\n[🎙️ VOICE INPUT] Unexpected Error: {e}")
 
+# Initializes the microphone and starts background voice recognition.
 def init_voice():
     # Initializes the microphone listening thread
     global stop_listening, voice_enabled
@@ -434,7 +436,7 @@ def init_voice():
         voice_enabled = False
         stop_listening = None
 
-
+# Stops the background voice recognition listener.
 def stop_voice():
     global stop_listening
     if stop_listening is not None:
@@ -451,7 +453,8 @@ def stop_voice():
 SIMULATION_MODE = False
 ser = None
 
-
+# Initializes the serial connection with the Arduino robot hand.
+# If the Arduino is not available, the system switches to simulation mode.
 def init_serial_connection(port=ARDUINO_PORT, baud_rate=ARDUINO_BAUD_RATE):
     # Connects to the Arduino. Falls back to simulation mode if hardware is missing.
     global SIMULATION_MODE
@@ -467,7 +470,7 @@ def init_serial_connection(port=ARDUINO_PORT, baud_rate=ARDUINO_BAUD_RATE):
         SIMULATION_MODE = True
         return None
 
-
+# Sends the desired number of raised fingers to the robotic hand.
 def send_robot_fingers(number):
     safe_number = limit_robot_fingers(number)
     if ser is not None and ser.is_open:
@@ -483,7 +486,7 @@ def send_robot_fingers(number):
 even_odd_model = None
 rps_model = None
 
-
+# Loads the trained machine learning models used for gesture prediction.
 def load_models():
     global even_odd_model, rps_model
     try:
@@ -503,6 +506,8 @@ def load_models():
 # =========================================================
 # Detection helpers for predictive games
 # =========================================================
+
+# Extracts hand movement and distance features for the predictive game models.
 def extract_prediction_features(hand_landmarks, previous_distances):
     # Extracts hand proportions and movement speeds to feed into the prediction models
     wrist = hand_landmarks.landmark[0]
@@ -620,6 +625,7 @@ MAX_LEVEL = 4
 # =========================================================
 # Screen transitions
 # =========================================================
+# Changes the current active screen and resets gesture hold states.
 def set_screen(screen):
     global current_screen, previous_menu_screen, hold_action, hold_start_time, last_action_time
     current_screen = screen
@@ -628,7 +634,7 @@ def set_screen(screen):
     last_action_time = time.time() + 0.2
     voice_guide.reset()
 
-
+# Returns the user to the correct previous menu based on the current screen.
 def back_to_previous_menu():
     if current_screen in [SCREEN_RPS, SCREEN_EVEN_ODD]:
         set_screen(GAME_MENU)
@@ -642,6 +648,8 @@ def back_to_previous_menu():
 # =========================================================
 # Game-specific helpers
 # =========================================================
+
+# Extracts a number between 0 and 5 from a spoken voice command.
 def parse_number_from_voice(command):
     # Extracts spoken digits or number words from voice commands
     command = command.upper()
@@ -653,7 +661,7 @@ def parse_number_from_voice(command):
             return number
     return None
 
-
+# Converts a detected finger count into a Rock/Paper/Scissors gesture.
 def classify_rps_from_fingers(finger_count):
     if finger_count == 0:
         return "ROCK"
@@ -663,7 +671,7 @@ def classify_rps_from_fingers(finger_count):
         return "PAPER"
     return "UNKNOWN"
 
-
+# Converts the raw model prediction into a Rock/Paper/Scissors move.
 def map_model_output_to_rps(raw_prediction):
     try:
         pred = int(raw_prediction)
@@ -681,7 +689,7 @@ def map_model_output_to_rps(raw_prediction):
         return "SCISSORS"
     return "PAPER"
 
-
+# Calculates the result of the Rock Paper Scissors game.
 def calculate_rps_result(actual_move, robot_choice):
     if actual_move == "UNKNOWN":
         return "No clear final move", NOTE_COLOR
@@ -691,7 +699,7 @@ def calculate_rps_result(actual_move, robot_choice):
         return "ROBOT WINS", GOOD_COLOR
     return "USER WINS", BAD_COLOR
 
-
+# Calculates the result of the Even/Odd game based on the user's side and the final total.
 def calculate_even_result(actual_move, robot_choice, selected_side):
     if actual_move < 0:
         return "No clear final hand", NOTE_COLOR
@@ -705,6 +713,8 @@ def calculate_even_result(actual_move, robot_choice, selected_side):
 # =========================================================
 # Reset/start functions
 # =========================================================
+
+# Starts a new Rock Paper Scissors round and resets all round-related variables.
 def rps_start_round():
     global rps_state, rps_countdown_start, rps_verify_start, rps_candidate_actual, rps_candidate_actual_start
     global rps_predicted_user_move, rps_actual_user_move, rps_robot_move, rps_result_text, rps_result_color
@@ -724,13 +734,13 @@ def rps_start_round():
     rps_prev_distances = None
     rps_has_predicted = False
 
-
+# Finalizes the Rock Paper Scissors round and moves to the result state.
 def rps_finish_result():
     global rps_state, rps_result_text, rps_result_color
     rps_result_text, rps_result_color = calculate_rps_result(rps_actual_user_move, rps_robot_move)
     rps_state = "RESULT"
 
-
+# Starts a new Even/Odd round and resets all round-related variables.
 def even_start_round():
     global even_state, even_countdown_start, even_verify_start, even_candidate_actual, even_candidate_actual_start
     global even_predicted_user_move, even_actual_user_move, even_robot_move, even_result_text, even_result_color
@@ -750,13 +760,13 @@ def even_start_round():
     even_prev_distances = None
     even_has_predicted = False
 
-
+# Finalizes the Even/Odd round and moves to the result state.
 def even_finish_result():
     global even_state, even_result_text, even_result_color
     even_result_text, even_result_color = calculate_even_result(even_actual_user_move, even_robot_move, even_selected_side)
     even_state = "RESULT"
 
-
+# Starts a new Counting/Imitation learning round.
 def count_start_round():
     global count_state, count_target_number, count_spoken_number, count_heard_text
     global count_candidate_fingers, count_candidate_start_time, count_stable_finger_answer
@@ -772,7 +782,7 @@ def count_start_round():
     send_robot_fingers(count_target_number)
     count_state = "WAIT_FOR_USER"
 
-
+# Checks the user's finger and voice answers in Counting mode and prepares feedback.
 def count_go_to_feedback(finger_answer, voice_answer):
     global count_state, count_feedback_text, count_feedback_color, count_feedback_start_time
     finger_correct = finger_answer == count_target_number
@@ -792,7 +802,7 @@ def count_go_to_feedback(finger_answer, voice_answer):
     count_feedback_start_time = time.time()
     count_state = "FEEDBACK"
 
-
+# Generates a Greater/Smaller exercise according to the current difficulty level.
 def gs_generate_exercise(mode):
     max_val = min(5, 1 + gs_current_level)
     a = random.randint(0, max_val)
@@ -802,7 +812,7 @@ def gs_generate_exercise(mode):
     ans = max(a, b) if mode == "GREATER" else min(a, b)
     return a, b, ans
 
-
+# Starts a new Greater/Smaller exercise and sends the first number to the robot.
 def gs_start_new_exercise():
     global gs_first_number, gs_second_number, gs_correct_answer, gs_state, gs_state_start_time, gs_candidate_answer, gs_candidate_start_time
     gs_first_number, gs_second_number, gs_correct_answer = gs_generate_exercise(gs_selected_mode)
@@ -812,7 +822,7 @@ def gs_start_new_exercise():
     gs_state_start_time = time.time()
     send_robot_fingers(gs_first_number)
 
-
+# Returns the Greater/Smaller activity back to the mode selection menu.
 def gs_go_to_mode_menu():
     global gs_state, gs_selected_mode, gs_candidate_answer, gs_candidate_start_time
     send_robot_fingers(0)
@@ -821,7 +831,7 @@ def gs_go_to_mode_menu():
     gs_candidate_answer = None
     gs_candidate_start_time = 0.0
 
-
+# Checks the user's answer in Greater/Smaller mode and updates the adaptive difficulty level.
 def gs_check_answer(answer_value):
     # Handles dynamic difficulty by updating the level based on correct or wrong answers
     global gs_feedback_text, gs_feedback_color, gs_last_answer_correct, gs_state, gs_state_start_time
@@ -857,7 +867,7 @@ def gs_check_answer(answer_value):
     gs_state = "FEEDBACK"
     gs_state_start_time = time.time()
 
-
+# Generates an addition or subtraction exercise according to the current difficulty level.
 def math_generate_exercise(operation):
     max_val = min(5, 1 + math_current_level)
     if operation == "ADD":
@@ -868,11 +878,11 @@ def math_generate_exercise(operation):
     b = random.randint(0, a)
     return a, b, a - b
 
-
+# Returns the mathematical symbol of the selected operation.
 def math_get_operation_symbol():
     return "+" if math_selected_operation == "ADD" else "-"
 
-
+# Starts a new Math exercise and sends the first number to the robot.
 def math_start_new_exercise():
     global math_first_number, math_second_number, math_correct_answer, math_state, math_state_start_time, math_candidate_answer, math_candidate_start_time
     math_first_number, math_second_number, math_correct_answer = math_generate_exercise(math_selected_operation)
@@ -882,7 +892,7 @@ def math_start_new_exercise():
     math_state_start_time = time.time()
     send_robot_fingers(math_first_number)
 
-
+# Returns the Math activity back to the operation selection menu.
 def math_go_to_operation_menu():
     global math_state, math_selected_operation, math_candidate_answer, math_candidate_start_time
     send_robot_fingers(0)
@@ -891,7 +901,7 @@ def math_go_to_operation_menu():
     math_candidate_answer = None
     math_candidate_start_time = 0.0
 
-
+# Checks the user's answer in Math mode and updates the adaptive difficulty level.
 def math_check_answer(answer_value):
     global math_feedback_text, math_feedback_color, math_last_answer_correct, math_state, math_state_start_time
     global math_current_level, math_consecutive_correct, math_consecutive_wrong
@@ -930,6 +940,8 @@ def math_check_answer(answer_value):
 # =========================================================
 # Voice instruction content
 # =========================================================
+
+# Builds the voice instruction text according to the current screen and state.
 def get_voice_payload():
     # Prepares the dynamic text string to be read aloud based on the current screen
     if current_screen == MAIN_MENU:
@@ -1021,6 +1033,7 @@ def get_voice_payload():
 # =========================================================
 # Voice command routing
 # =========================================================
+# Routes spoken commands to the correct screen, menu, or game action.
 def handle_voice_command(command):
     # Processes spoken commands to navigate the interface or perform actions
     global current_screen, last_action_time
@@ -1159,13 +1172,14 @@ def handle_voice_command(command):
 # =========================================================
 # Reset wrappers for entering screens
 # =========================================================
+# Resets Rock Paper Scissors mode to its ready state.
 def rps_state_reset_to_ready():
     global rps_state, rps_prev_distances
     send_robot_fingers(0)
     rps_state = "READY"
     rps_prev_distances = None
 
-
+# Resets Even/Odd mode to the side selection state.
 def even_state_reset_to_choose():
     global even_state, even_selected_side, even_prev_distances
     send_robot_fingers(0)
@@ -1173,20 +1187,20 @@ def even_state_reset_to_choose():
     even_selected_side = None
     even_prev_distances = None
 
-
+# Resets Counting mode to its ready state.
 def count_state_reset_to_ready():
     global count_state
     send_robot_fingers(0)
     count_state = "READY"
 
-
+# Resets Greater/Smaller mode to the mode selection state.
 def gs_state_reset_to_choose():
     global gs_state, gs_selected_mode
     send_robot_fingers(0)
     gs_state = "CHOOSE_MODE"
     gs_selected_mode = None
 
-
+# Resets Math mode to the operation selection state.
 def math_state_reset_to_choose():
     global math_state, math_selected_operation
     send_robot_fingers(0)
@@ -1197,6 +1211,7 @@ def math_state_reset_to_choose():
 # =========================================================
 # Render/update functions per screen
 # =========================================================
+# Renders and handles the main menu screen.
 def render_main_menu(panel, current_time, current_fingers, ok_detected):
     global current_screen
     draw_lines(panel, ["MAIN MENU"], 50, TITLE_COLOR, scale=1.2, thickness=3)
@@ -1215,7 +1230,7 @@ def render_main_menu(panel, current_time, current_fingers, ok_detected):
     elif action == "go_learning":
         set_screen(LEARNING_MENU)
 
-
+# Renders and handles the Game Mode menu.
 def render_game_menu(panel, current_time, current_fingers, ok_detected):
     draw_lines(panel, ["GAME MODE"], 50, TITLE_COLOR, scale=1.2, thickness=3)
     draw_lines(panel, ["Show 1 finger = Rock Paper Scissors", "Show 2 fingers = Even Odd"], 110, OPTION_COLOR, scale=0.8, thickness=2, step=40)
@@ -1239,7 +1254,7 @@ def render_game_menu(panel, current_time, current_fingers, ok_detected):
         even_state_reset_to_choose()
         set_screen(SCREEN_EVEN_ODD)
 
-
+# Renders and handles the Learning Mode menu.
 def render_learning_menu(panel, current_time, current_fingers, ok_detected):
     draw_lines(panel, ["LEARNING MODE"], 50, TITLE_COLOR, scale=1.2, thickness=3)
     draw_lines(panel, ["Show 1 finger = Counting / Imitation", "Show 2 fingers = Addition / Subtraction", "Show 3 fingers = Greater / Smaller"], 100, OPTION_COLOR, scale=0.75, thickness=2, step=35)
@@ -1268,7 +1283,8 @@ def render_learning_menu(panel, current_time, current_fingers, ok_detected):
         gs_state_reset_to_choose()
         set_screen(SCREEN_BIG_SMALL)
 
-
+# Renders and handles the full Rock Paper Scissors game flow.
+# The robot predicts the user's move and chooses a winning response.
 def render_rps(panel, camera_view, current_time, hand_landmarks_list, first_hand_landmarks, current_fingers_single, current_ok, current_thumbs, h, w):
     # Handles logic and UI updates for Rock Paper Scissors mode
     global rps_state, rps_countdown_start, rps_candidate_actual, rps_candidate_actual_start, rps_actual_user_move
@@ -1364,7 +1380,8 @@ def render_rps(panel, camera_view, current_time, hand_landmarks_list, first_hand
         elif action == "BACK":
             back_to_previous_menu()
 
-
+# Renders and handles the Even/Odd game flow.
+# The robot predicts the user's number and chooses a move that makes it win.
 def render_even_odd(panel, camera_view, current_time, all_hand_landmarks, first_hand_landmarks, current_fingers_single, current_fingers_two, current_ok, current_thumbs, h, w):
     # Handles logic and UI updates for the Even/Odd mode
     global even_state, even_selected_side, even_prev_distances, even_locked_features, even_has_predicted
@@ -1469,7 +1486,7 @@ def render_even_odd(panel, camera_view, current_time, all_hand_landmarks, first_
         elif action == "BACK":
             back_to_previous_menu()
 
-
+# Renders and handles the Counting/Imitation learning activity.
 def render_counting(panel, current_time, current_fingers_single, current_ok, current_thumbs, h):
     # Handles logic and UI updates for the Counting learning mode
     global count_state, count_candidate_fingers, count_candidate_start_time, count_stable_finger_answer
@@ -1537,7 +1554,7 @@ def render_counting(panel, current_time, current_fingers_single, current_ok, cur
         elif action == "BACK":
             back_to_previous_menu()
 
-
+# Renders and handles the Greater/Smaller adaptive learning activity.
 def render_big_small(panel, current_time, all_hand_landmarks, current_fingers_two, current_ok, current_thumbs, h):
     # Handles logic and UI updates for the Greater/Smaller learning mode
     global gs_state, gs_selected_mode, gs_candidate_answer, gs_candidate_start_time, gs_state_start_time
@@ -1651,7 +1668,7 @@ def render_big_small(panel, current_time, all_hand_landmarks, current_fingers_tw
         elif action == "BACK":
             gs_go_to_mode_menu()
 
-
+# Renders and handles the Addition/Subtraction adaptive learning activity.
 def render_math(panel, current_time, all_hand_landmarks, current_fingers_two, current_ok, current_thumbs, h):
     # Handles logic and UI updates for the Math (Addition/Subtraction) mode
     global math_state, math_selected_operation, math_candidate_answer, math_candidate_start_time, math_state_start_time
